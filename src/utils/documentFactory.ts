@@ -7,7 +7,9 @@ import {
   PodsumowanieSpecjalistyDoc,
   ReportDocument,
   SPECIALIST_ROLE_LABELS,
+  SemesterType,
   SpecialistRole,
+  SubjectAssignment,
   TeacherProfile,
   ZbiorczeEfektyDoc,
   ZbiorczeRow,
@@ -28,6 +30,28 @@ export function getTodayPolishDate(): string {
   return `${dd}.${mm}.${yyyy}`;
 }
 
+export function suggestNextSchoolYear(currentYear: string): string {
+  const match = currentYear.trim().match(/^(\d{4})\/(\d{4})$/);
+  if (match) {
+    const start = Number(match[1]) + 1;
+    const end = Number(match[2]) + 1;
+    return `${start}/${end}`;
+  }
+  const nowYear = new Date().getFullYear();
+  return `${nowYear}/${nowYear + 1}`;
+}
+
+export function findSubjectAssignment(
+  profile: TeacherProfile,
+  subject: string
+): SubjectAssignment | undefined {
+  const normalized = subject.trim().toLowerCase();
+  if (!normalized) return undefined;
+  return (profile.subjectAssignments ?? []).find(
+    (item) => item.subject.trim().toLowerCase() === normalized
+  );
+}
+
 export function createDefaultProfile(): TeacherProfile {
   return {
     fullName: '',
@@ -39,6 +63,14 @@ export function createDefaultProfile(): TeacherProfile {
     homeroomClass: '',
     classesList: ['4A', '5B'],
     subjectsList: ['Matematyka'],
+    subjectAssignments: [
+      {
+        id: createId(),
+        subject: 'Matematyka',
+        programNumber: '',
+        textbookTitle: '',
+      },
+    ],
     signatureDate: getTodayPolishDate(),
   };
 }
@@ -48,14 +80,21 @@ export function createEfektyNauczaniaDoc(
   overrides?: Partial<EfektyNauczaniaDoc>
 ): EfektyNauczaniaDoc {
   const now = new Date().toISOString();
-  const subject = overrides?.subject ?? profile.subjectsList[0] ?? '';
+  const subject =
+    overrides?.subject ??
+    profile.subjectAssignments?.[0]?.subject ??
+    profile.subjectsList[0] ??
+    '';
+  const assignment = findSubjectAssignment(profile, subject);
   const className = overrides?.className ?? profile.classesList[0] ?? '';
   const titleParts = [subject || 'Przedmiot', className ? `kl. ${className}` : ''].filter(Boolean);
 
   return {
     id: createId(),
     type: 'efekty_nauczania',
-    title: overrides?.title ?? (titleParts.length > 0 ? titleParts.join(' · ') : DOCUMENT_TYPE_LABELS.efekty_nauczania),
+    title:
+      overrides?.title ??
+      (titleParts.length > 0 ? titleParts.join(' · ') : DOCUMENT_TYPE_LABELS.efekty_nauczania),
     createdAt: now,
     updatedAt: now,
     schoolName: profile.schoolName,
@@ -63,8 +102,8 @@ export function createEfektyNauczaniaDoc(
     semester: profile.defaultSemester,
     teacherName: profile.fullName,
     subject,
-    programNumber: '',
-    textbookTitle: '',
+    programNumber: assignment?.programNumber ?? '',
+    textbookTitle: assignment?.textbookTitle ?? '',
     className,
     curriculumStatus: 'na_biezaco',
     curriculumScope: '',
@@ -87,26 +126,29 @@ export function createEfektyNauczaniaDoc(
 
 export function createZbiorczeEfektyDoc(
   profile: TeacherProfile,
-  mode: 'przedmiotowy' | 'wczesnoszkolna' = 'przedmiotowy'
+  mode: 'przedmiotowy' | 'wczesnoszkolna' = 'przedmiotowy',
+  schoolYearOverride?: string
 ): ZbiorczeEfektyDoc {
   const now = new Date().toISOString();
+  const defaultSubject =
+    profile.subjectAssignments?.[0]?.subject ?? profile.subjectsList[0] ?? '';
   return {
     id: createId(),
     type: 'zbiorcze_efekty',
     title:
       mode === 'wczesnoszkolna'
         ? 'Sprawozdanie zbiorcze · Edukacja wczesnoszkolna'
-        : `Sprawozdanie zbiorcze · ${profile.subjectsList[0] || 'Zespół przedmiotowy'}`,
+        : `Sprawozdanie zbiorcze · ${defaultSubject || 'Zespół przedmiotowy'}`,
     createdAt: now,
     updatedAt: now,
     schoolName: profile.schoolName,
-    schoolYear: profile.schoolYear,
+    schoolYear: schoolYearOverride ?? profile.schoolYear,
     semester: profile.defaultSemester,
     coordinatorName: profile.fullName,
     subjectOrStage:
       mode === 'wczesnoszkolna'
         ? 'Edukacja wczesnoszkolna (klasy I–III)'
-        : profile.subjectsList[0] || '',
+        : defaultSubject,
     mode,
     rows: [
       {
@@ -131,8 +173,16 @@ export function createZbiorczeEfektyDoc(
   };
 }
 
-export function createKartaInformacyjnaDoc(profile: TeacherProfile): KartaInformacyjnaDoc {
+export function createKartaInformacyjnaDoc(
+  profile: TeacherProfile,
+  schoolYearOverride?: string
+): KartaInformacyjnaDoc {
   const now = new Date().toISOString();
+  const subjects =
+    profile.subjectAssignments?.length > 0
+      ? profile.subjectAssignments.map((a) => a.subject)
+      : profile.subjectsList;
+
   return {
     id: createId(),
     type: 'karta_informacyjna',
@@ -140,14 +190,14 @@ export function createKartaInformacyjnaDoc(profile: TeacherProfile): KartaInform
     createdAt: now,
     updatedAt: now,
     schoolName: profile.schoolName,
-    schoolYear: profile.schoolYear,
+    schoolYear: schoolYearOverride ?? profile.schoolYear,
     teacherName: profile.fullName,
     period: profile.periodText,
     totalHours: '',
     homeroomClass: profile.homeroomClass,
     subjectHours:
-      profile.subjectsList.length > 0
-        ? profile.subjectsList.map((s) => ({ id: createId(), subject: s, hours: '' }))
+      subjects.length > 0
+        ? subjects.map((s) => ({ id: createId(), subject: s, hours: '' }))
         : [{ id: createId(), subject: '', hours: '' }],
     qualificationsStudies: '',
     qualificationsWorkshops: '',
@@ -164,7 +214,8 @@ export function createKartaInformacyjnaDoc(profile: TeacherProfile): KartaInform
 
 export function createPodsumowanieSpecjalistyDoc(
   profile: TeacherProfile,
-  role: SpecialistRole = 'pedagog_psycholog'
+  role: SpecialistRole = 'pedagog_psycholog',
+  schoolYearOverride?: string
 ): PodsumowanieSpecjalistyDoc {
   const now = new Date().toISOString();
   return {
@@ -174,7 +225,7 @@ export function createPodsumowanieSpecjalistyDoc(
     createdAt: now,
     updatedAt: now,
     schoolName: profile.schoolName,
-    schoolYear: profile.schoolYear,
+    schoolYear: schoolYearOverride ?? profile.schoolYear,
     semester: 'II',
     role,
     specialistName: profile.fullName,
@@ -193,17 +244,32 @@ export function createPodsumowanieSpecjalistyDoc(
 export function createDocumentByType(
   type: DocumentType,
   profile: TeacherProfile,
-  options?: { specialistRole?: SpecialistRole; coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna' }
+  options?: {
+    specialistRole?: SpecialistRole;
+    coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna';
+    schoolYear?: string;
+  }
 ): ReportDocument {
   switch (type) {
     case 'efekty_nauczania':
-      return createEfektyNauczaniaDoc(profile);
+      return createEfektyNauczaniaDoc(
+        profile,
+        options?.schoolYear ? { schoolYear: options.schoolYear } : undefined
+      );
     case 'zbiorcze_efekty':
-      return createZbiorczeEfektyDoc(profile, options?.coordinatorMode ?? 'przedmiotowy');
+      return createZbiorczeEfektyDoc(
+        profile,
+        options?.coordinatorMode ?? 'przedmiotowy',
+        options?.schoolYear
+      );
     case 'karta_informacyjna':
-      return createKartaInformacyjnaDoc(profile);
+      return createKartaInformacyjnaDoc(profile, options?.schoolYear);
     case 'podsumowanie_specjalisty':
-      return createPodsumowanieSpecjalistyDoc(profile, options?.specialistRole ?? 'pedagog_psycholog');
+      return createPodsumowanieSpecjalistyDoc(
+        profile,
+        options?.specialistRole ?? 'pedagog_psycholog',
+        options?.schoolYear
+      );
   }
 }
 
@@ -221,19 +287,145 @@ export function clearDocumentFields(doc: ReportDocument, profile: TeacherProfile
   const fresh = createDocumentByType(doc.type, profile, {
     specialistRole: doc.type === 'podsumowanie_specjalisty' ? doc.role : undefined,
     coordinatorMode: doc.type === 'zbiorcze_efekty' ? doc.mode : undefined,
+    schoolYear: doc.schoolYear,
   });
   fresh.id = doc.id;
   fresh.createdAt = doc.createdAt;
   return fresh;
 }
 
+export function cloneDocumentsForNewSchoolYear(
+  sourceDocs: ReportDocument[],
+  options: {
+    targetYear: string;
+    targetSemester: SemesterType;
+    mode: 'clean_base' | 'full_copy';
+    carryOverConclusions: boolean;
+  },
+  profile: TeacherProfile
+): ReportDocument[] {
+  const now = new Date().toISOString();
+  const signatureDate = profile.signatureDate || getTodayPolishDate();
+
+  return sourceDocs.map((source) => {
+    const clone = JSON.parse(JSON.stringify(source)) as ReportDocument;
+    clone.id = createId();
+    clone.createdAt = now;
+    clone.updatedAt = now;
+    clone.schoolYear = options.targetYear.trim() || profile.schoolYear;
+    clone.signatureDate = signatureDate;
+
+    if (clone.type === 'efekty_nauczania') {
+      clone.semester = options.targetSemester;
+      const assignment = findSubjectAssignment(profile, clone.subject);
+      if (assignment) {
+        if (assignment.programNumber) clone.programNumber = assignment.programNumber;
+        if (assignment.textbookTitle) clone.textbookTitle = assignment.textbookTitle;
+      }
+
+      if (options.mode === 'clean_base') {
+        const prevFuture = clone.futureConclusions.trim();
+        clone.curriculumStatus = 'na_biezaco';
+        clone.curriculumScope = '';
+        clone.curriculumNotes = '';
+        clone.failingGradesCount = '0';
+        clone.excellentGradesCount = '0';
+        clone.gradesNotes = '';
+        clone.individualPathSummary = '';
+        clone.competitionsNone = false;
+        clone.competitionsDetails = '';
+        clone.educationalTrips = '';
+        clone.preventiveProgram = '';
+        clone.previousConclusionsStatus =
+          options.carryOverConclusions && prevFuture ? prevFuture : '';
+        clone.futureConclusions = '';
+      }
+      return clone;
+    }
+
+    if (clone.type === 'zbiorcze_efekty') {
+      clone.semester = options.targetSemester;
+      if (options.mode === 'clean_base') {
+        const prevFuture = clone.futureConclusions.trim();
+        clone.rows = clone.rows.map((row) => ({
+          ...row,
+          id: createId(),
+          curriculumStatus: 'na_biezaco',
+          curriculumDetails: '',
+          failingCount: '0',
+          excellentCount: '0',
+          notes: '',
+        }));
+        clone.earlyEdWeakAreas = '';
+        clone.earlyEdStrongAreas = '';
+        clone.achievements = '';
+        clone.educationalTrips = '';
+        clone.preventiveProgram = '';
+        clone.previousConclusionsStatus =
+          options.carryOverConclusions && prevFuture ? prevFuture : '';
+        clone.futureConclusions = '';
+      }
+      return clone;
+    }
+
+    if (clone.type === 'karta_informacyjna') {
+      if (options.mode === 'clean_base') {
+        clone.subjectHours = clone.subjectHours.map((s) => ({
+          ...s,
+          id: createId(),
+        }));
+        clone.qualificationsStudies = '';
+        clone.qualificationsWorkshops = '';
+        clone.qualificationsMethodical = '';
+        clone.studentAchievements = '';
+        clone.tripsOrganization = '';
+        clone.didacticBaseEnrichment = '';
+        clone.statutoryActivities = '';
+        clone.directorTasks = [{ id: createId(), taskType: '', results: '', conclusions: '' }];
+        clone.teacherInitiativeTasks = [
+          { id: createId(), taskType: '', results: '', conclusions: '' },
+        ];
+      }
+      return clone;
+    }
+
+    // podsumowanie_specjalisty
+    clone.semester = options.targetSemester;
+    if (options.mode === 'clean_base') {
+      const prevFuture = clone.futureConclusions.trim();
+      clone.tasksRealization = '';
+      clone.effects = '';
+      clone.conclusions = '';
+      clone.preventiveProgram = '';
+      clone.previousConclusionsStatus =
+        options.carryOverConclusions && prevFuture ? prevFuture : '';
+      clone.futureConclusions = '';
+    }
+    return clone;
+  });
+}
+
+export function getMatchingSubjectCardsForCoordinator(
+  allDocs: ReportDocument[],
+  target: ZbiorczeEfektyDoc
+): EfektyNauczaniaDoc[] {
+  return allDocs.filter((d): d is EfektyNauczaniaDoc => {
+    if (d.type !== 'efekty_nauczania') return false;
+    if (target.schoolYear && d.schoolYear && d.schoolYear !== target.schoolYear) {
+      return false;
+    }
+    if (target.semester && d.semester !== target.semester) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export function aggregateIntoCoordinatorDoc(
   allDocs: ReportDocument[],
   target: ZbiorczeEfektyDoc
 ): ZbiorczeEfektyDoc {
-  const matchingCards = allDocs.filter(
-    (d): d is EfektyNauczaniaDoc => d.type === 'efekty_nauczania'
-  );
+  const matchingCards = getMatchingSubjectCardsForCoordinator(allDocs, target);
 
   if (matchingCards.length === 0) {
     return target;

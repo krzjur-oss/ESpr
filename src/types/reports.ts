@@ -16,6 +16,13 @@ export type SpecialistRole =
   | 'logopeda'
   | 'swietlica';
 
+export interface SubjectAssignment {
+  id: string;
+  subject: string;
+  programNumber: string;
+  textbookTitle: string;
+}
+
 export interface TeacherProfile {
   fullName: string;
   schoolName: string;
@@ -26,6 +33,7 @@ export interface TeacherProfile {
   homeroomClass: string;
   classesList: string[];
   subjectsList: string[];
+  subjectAssignments: SubjectAssignment[];
   signatureDate: string;
 }
 

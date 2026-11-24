@@ -60,7 +60,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
           Kopia zapasowa i przenoszenie danych (JSON)
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          Aplikacja działa w trybie Local-First — wszystkie dane przechowywane są wyłącznie w Twojej przeglądarce. Eksportuj plik JSON, aby zachować archiwum na kolejny semestr lub przenieść dane na inny komputer.
+          Aplikacja działa w trybie Local-First — wszystkie dane przechowywane są wyłącznie w lokalnej bazie IndexedDB Twojej przeglądarki (bez obciążania localStorage). Eksportuj plik JSON, aby zachować archiwum lub przenieść dane na inny komputer.
         </p>
       </div>
 
@@ -152,7 +152,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
       <section className="mt-8 rounded-xl border border-red-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-red-900">
-            Reset całej aplikacji i pamięci lokalnej
+            Reset całej aplikacji i bazy IndexedDB
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             Usuwa wszystkie zapisane w przeglądarce formularze oraz dane profilu, przywracając czysty stan początkowy.

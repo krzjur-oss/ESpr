@@ -7,7 +7,11 @@ import {
   ZbiorczeEfektyDoc,
   ZbiorczeRow,
 } from '../../types/reports';
-import { aggregateIntoCoordinatorDoc, createId } from '../../utils/documentFactory';
+import {
+  aggregateIntoCoordinatorDoc,
+  createId,
+  getMatchingSubjectCardsForCoordinator,
+} from '../../utils/documentFactory';
 import {
   ConclusionsField,
   Field,
@@ -32,7 +36,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
   onOpenConclusionsPicker,
   onRequestReset,
 }) => {
-  const subjectCardsCount = allDocuments.filter((d) => d.type === 'efekty_nauczania').length;
+  const subjectCardsCount = getMatchingSubjectCardsForCoordinator(allDocuments, doc).length;
 
   const update = (patch: Partial<ZbiorczeEfektyDoc>) => {
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };

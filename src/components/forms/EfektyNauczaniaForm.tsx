@@ -1,10 +1,12 @@
 import React from 'react';
+import { BookCheck } from 'lucide-react';
 import {
   CURRICULUM_STATUS_LABELS,
   CurriculumStatus,
   EfektyNauczaniaDoc,
   TeacherProfile,
 } from '../../types/reports';
+import { findSubjectAssignment } from '../../utils/documentFactory';
 import {
   ConclusionsField,
   Field,
@@ -29,8 +31,28 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
   onOpenConclusionsPicker,
   onRequestReset,
 }) => {
+  const matchedAssignment = findSubjectAssignment(profile, doc.subject);
+
   const update = (patch: Partial<EfektyNauczaniaDoc>) => {
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
+    if ('subject' in patch) {
+      const prevAssignment = findSubjectAssignment(profile, doc.subject);
+      const nextAssignment = findSubjectAssignment(profile, patch.subject ?? '');
+      if (nextAssignment) {
+        const programEmptyOrAuto =
+          !doc.programNumber.trim() ||
+          (prevAssignment && doc.programNumber === prevAssignment.programNumber);
+        const textbookEmptyOrAuto =
+          !doc.textbookTitle.trim() ||
+          (prevAssignment && doc.textbookTitle === prevAssignment.textbookTitle);
+        if (programEmptyOrAuto && nextAssignment.programNumber) {
+          next.programNumber = nextAssignment.programNumber;
+        }
+        if (textbookEmptyOrAuto && nextAssignment.textbookTitle) {
+          next.textbookTitle = nextAssignment.textbookTitle;
+        }
+      }
+    }
     if ('subject' in patch || 'className' in patch) {
       const subj = (patch.subject ?? doc.subject).trim();
       const cls = (patch.className ?? doc.className).trim();
@@ -38,6 +60,13 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
     }
     onChange(next);
   };
+
+  const canApplyFromProfile =
+    !!matchedAssignment &&
+    ((matchedAssignment.programNumber &&
+      matchedAssignment.programNumber !== doc.programNumber) ||
+      (matchedAssignment.textbookTitle &&
+        matchedAssignment.textbookTitle !== doc.textbookTitle));
 
   return (
     <div className="space-y-8">
@@ -146,7 +175,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
             />
           </Field>
 
-          <div className="md:col-span-2">
+          <div className="md:col-span-2 space-y-2">
             <Field label="Tytuł i autor podręcznika">
               <input
                 type="text"
@@ -156,6 +185,29 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
                 className={inputClass}
               />
             </Field>
+            {canApplyFromProfile && matchedAssignment && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-950">
+                <span>
+                  W Profilu zapisano program i podręcznik dla przedmiotu{' '}
+                  <strong>{matchedAssignment.subject}</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    update({
+                      programNumber:
+                        matchedAssignment.programNumber || doc.programNumber,
+                      textbookTitle:
+                        matchedAssignment.textbookTitle || doc.textbookTitle,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-md bg-blue-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-800 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <BookCheck className="w-3.5 h-3.5" />
+                  <span>Wczytaj z Profilu</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>

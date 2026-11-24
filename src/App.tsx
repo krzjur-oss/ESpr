@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, FilePlus2, FileText, PanelRightClose, PanelRightOpen, Printer, UserCog } from 'lucide-react';
+import {
+  Eye,
+  FilePlus2,
+  FileText,
+  PanelRightClose,
+  PanelRightOpen,
+  Printer,
+  UserCog,
+} from 'lucide-react';
 import { BackupJsonView } from './components/BackupJsonView';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { DocumentSidebar } from './components/DocumentSidebar';
+import { NewYearRolloverModal } from './components/NewYearRolloverModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ProfileView } from './components/ProfileView';
 import { TopBar } from './components/TopBar';
@@ -19,28 +28,44 @@ import {
   DocumentType,
   MainTab,
   ReportDocument,
+  SemesterType,
   SpecialistRole,
   TeacherProfile,
 } from './types/reports';
 import {
   clearDocumentFields,
+  cloneDocumentsForNewSchoolYear,
   createDocumentByType,
   createId,
   createInitialAppState,
   duplicateDocument,
+  findSubjectAssignment,
 } from './utils/documentFactory';
-import { loadAppState, saveAppState } from './utils/storage';
 import { printElementIsolated } from './utils/printDocument';
+import {
+  flushPendingAppStateSave,
+  loadAppState,
+  resetAllStoredState,
+  saveAppStateImmediate,
+  scheduleSaveAppState,
+  StorageBackend,
+} from './utils/storage';
 
 type EditorLayoutMode = 'split' | 'editor' | 'preview';
 
 export default function App() {
-  const [state, setState] = useState<AppState>(() => loadAppState());
+  const [state, setState] = useState<AppState>(() => createInitialAppState());
+  const [isHydrating, setIsHydrating] = useState(true);
+  const [storageBackend, setStorageBackend] = useState<StorageBackend>('indexeddb');
+  const hasHydratedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<MainTab>('kreator');
   const [layoutMode, setLayoutMode] = useState<EditorLayoutMode>('split');
   const [printMode, setPrintMode] = useState<'active' | 'all'>('active');
+  const [yearFilter, setYearFilter] = useState<string>('all');
   const [previewZoom, setPreviewZoom] = useState<number>(0.72);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [rolloverOpen, setRolloverOpen] = useState(false);
+
   const activePrintRef = useRef<HTMLDivElement | null>(null);
   const batchPrintRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,14 +76,77 @@ export default function App() {
     | null
   >(null);
 
-  // Persist every change locally (Local-First)
+  // Hydrate initial state asynchronously from IndexedDB (migrating legacy localStorage if present)
   useEffect(() => {
-    saveAppState(state);
+    let active = true;
+    void loadAppState().then(({ state: loaded, backend }) => {
+      if (!active) return;
+      hasHydratedRef.current = true;
+      setState(loaded);
+      setStorageBackend(backend);
+      setIsHydrating(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Persist changes incrementally to IndexedDB (only after initial hydration)
+  useEffect(() => {
+    if (!hasHydratedRef.current) return;
+    scheduleSaveAppState(state);
   }, [state]);
 
+  // Flush any debounced writes before page hide / unload
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingAppStateSave();
+      }
+    };
+    const handlePageHide = () => {
+      flushPendingAppStateSave();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      flushPendingAppStateSave();
+    };
+  }, []);
+
+  const availableYears = useMemo(() => {
+    const set = new Set<string>();
+    if (state.profile.schoolYear.trim()) {
+      set.add(state.profile.schoolYear.trim());
+    }
+    for (const d of state.documents) {
+      set.add(d.schoolYear?.trim() || 'Bez roku');
+    }
+    return Array.from(set).sort((a, b) => {
+      if (a === state.profile.schoolYear.trim() && b !== a) return -1;
+      if (b === state.profile.schoolYear.trim() && a !== b) return 1;
+      if (a === 'Bez roku') return 1;
+      if (b === 'Bez roku') return -1;
+      return b.localeCompare(a, 'pl');
+    });
+  }, [state.documents, state.profile.schoolYear]);
+
+  const yearScopedDocuments = useMemo(() => {
+    if (yearFilter === 'all') return state.documents;
+    return state.documents.filter(
+      (d) => (d.schoolYear?.trim() || 'Bez roku') === yearFilter
+    );
+  }, [state.documents, yearFilter]);
+
   const activeDoc = useMemo(
-    () => state.documents.find((d) => d.id === state.activeDocumentId) ?? state.documents[0] ?? null,
-    [state.documents, state.activeDocumentId]
+    () =>
+      state.documents.find((d) => d.id === state.activeDocumentId) ??
+      yearScopedDocuments[0] ??
+      state.documents[0] ??
+      null,
+    [state.documents, state.activeDocumentId, yearScopedDocuments]
   );
 
   const suggestedCategory = useMemo(
@@ -67,51 +155,65 @@ export default function App() {
   );
 
   const docsToPrint = useMemo(() => {
-    if (printMode === 'all') return state.documents;
+    if (printMode === 'all') return yearScopedDocuments;
     return activeDoc ? [activeDoc] : [];
-  }, [printMode, state.documents, activeDoc]);
+  }, [printMode, yearScopedDocuments, activeDoc]);
 
   const updateProfile = (profile: TeacherProfile) => {
     setState((prev) => ({ ...prev, profile }));
   };
 
   const applyProfileToAllDocuments = () => {
-    setState((prev) => ({
-      ...prev,
-      documents: prev.documents.map((doc) => {
-        const base = {
-          ...doc,
-          schoolName: prev.profile.schoolName || doc.schoolName,
-          schoolYear: prev.profile.schoolYear || doc.schoolYear,
-          signatureDate: prev.profile.signatureDate || doc.signatureDate,
-          updatedAt: new Date().toISOString(),
-        };
-        if (base.type === 'efekty_nauczania') {
+    setState((prev) => {
+      const targetYear = prev.profile.schoolYear.trim();
+      return {
+        ...prev,
+        documents: prev.documents.map((doc) => {
+          // Protect archived cards from previous school years from being overwritten
+          const isCurrentOrUnassignedYear =
+            !targetYear || !doc.schoolYear.trim() || doc.schoolYear.trim() === targetYear;
+          if (!isCurrentOrUnassignedYear) {
+            return doc;
+          }
+
+          const base = {
+            ...doc,
+            schoolName: prev.profile.schoolName || doc.schoolName,
+            schoolYear: doc.schoolYear || targetYear,
+            signatureDate: prev.profile.signatureDate || doc.signatureDate,
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (base.type === 'efekty_nauczania') {
+            const assignment = findSubjectAssignment(prev.profile, base.subject);
+            return {
+              ...base,
+              teacherName: prev.profile.fullName || base.teacherName,
+              programNumber: assignment?.programNumber || base.programNumber,
+              textbookTitle: assignment?.textbookTitle || base.textbookTitle,
+            };
+          }
+          if (base.type === 'zbiorcze_efekty') {
+            return {
+              ...base,
+              coordinatorName: prev.profile.fullName || base.coordinatorName,
+            };
+          }
+          if (base.type === 'karta_informacyjna') {
+            return {
+              ...base,
+              teacherName: prev.profile.fullName || base.teacherName,
+              period: prev.profile.periodText || base.period,
+              homeroomClass: prev.profile.homeroomClass || base.homeroomClass,
+            };
+          }
           return {
             ...base,
-            teacherName: prev.profile.fullName || base.teacherName,
+            specialistName: prev.profile.fullName || base.specialistName,
           };
-        }
-        if (base.type === 'zbiorcze_efekty') {
-          return {
-            ...base,
-            coordinatorName: prev.profile.fullName || base.coordinatorName,
-          };
-        }
-        if (base.type === 'karta_informacyjna') {
-          return {
-            ...base,
-            teacherName: prev.profile.fullName || base.teacherName,
-            period: prev.profile.periodText || base.period,
-            homeroomClass: prev.profile.homeroomClass || base.homeroomClass,
-          };
-        }
-        return {
-          ...base,
-          specialistName: prev.profile.fullName || base.specialistName,
-        };
-      }),
-    }));
+        }),
+      };
+    });
   };
 
   const handleUpdateDocument = (updated: ReportDocument) => {
@@ -125,7 +227,14 @@ export default function App() {
     type: DocumentType,
     options?: { specialistRole?: SpecialistRole; coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna' }
   ) => {
-    const newDoc = createDocumentByType(type, state.profile, options);
+    const targetSchoolYear =
+      yearFilter !== 'all' && yearFilter !== 'Bez roku'
+        ? yearFilter
+        : state.profile.schoolYear;
+    const newDoc = createDocumentByType(type, state.profile, {
+      ...options,
+      schoolYear: targetSchoolYear,
+    });
     setState((prev) => ({
       ...prev,
       documents: [...prev.documents, newDoc],
@@ -143,6 +252,57 @@ export default function App() {
       documents: [...prev.documents, copy],
       activeDocumentId: copy.id,
     }));
+  };
+
+  const handleChangeYearFilter = (nextYear: string) => {
+    setYearFilter(nextYear);
+    if (nextYear !== 'all') {
+      const firstInYear = state.documents.find(
+        (d) => (d.schoolYear?.trim() || 'Bez roku') === nextYear
+      );
+      if (
+        firstInYear &&
+        activeDoc &&
+        (activeDoc.schoolYear?.trim() || 'Bez roku') !== nextYear
+      ) {
+        setState((prev) => ({ ...prev, activeDocumentId: firstInYear.id }));
+      }
+    }
+  };
+
+  const handleRolloverToNewYear = (params: {
+    sourceDocIds: string[];
+    targetYear: string;
+    targetSemester: SemesterType;
+    mode: 'clean_base' | 'full_copy';
+    carryOverConclusions: boolean;
+  }) => {
+    const sourceDocs = state.documents.filter((d) => params.sourceDocIds.includes(d.id));
+    if (sourceDocs.length === 0) return;
+
+    const clonedDocs = cloneDocumentsForNewSchoolYear(
+      sourceDocs,
+      {
+        targetYear: params.targetYear,
+        targetSemester: params.targetSemester,
+        mode: params.mode,
+        carryOverConclusions: params.carryOverConclusions,
+      },
+      state.profile
+    );
+
+    setState((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        schoolYear: params.targetYear,
+        defaultSemester: params.targetSemester,
+      },
+      documents: [...clonedDocs, ...prev.documents],
+      activeDocumentId: clonedDocs[0]?.id ?? prev.activeDocumentId,
+    }));
+    setYearFilter(params.targetYear);
+    setActiveTab('kreator');
   };
 
   const handleInsertConclusion = (text: string, mode: 'append' | 'replace') => {
@@ -209,7 +369,9 @@ export default function App() {
     } else if (confirmDialog.kind === 'reset_all') {
       const fresh = createInitialAppState();
       setState(fresh);
+      setYearFilter('all');
       setActiveTab('kreator');
+      void resetAllStoredState(fresh);
     }
     setConfirmDialog(null);
   };
@@ -228,9 +390,10 @@ export default function App() {
       handlePrintActiveDocument();
       return;
     }
+    const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
     printElementIsolated(
       batchPrintRef.current,
-      `Komplet sprawozdań (${docsToPrint.length})`
+      `Komplet sprawozdań${yearSuffix} - ${docsToPrint.length} dok.`
     );
   };
 
@@ -251,6 +414,18 @@ export default function App() {
 
       {/* Main Interactive Workspace (hidden when printing) */}
       <main className="flex-1 flex flex-col no-print">
+        {isHydrating ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
+            <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-blue-900 animate-spin mb-3" />
+            <p className="text-sm font-medium text-slate-800">
+              Wczytywanie lokalnego archiwum (IndexedDB)…
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Wszystkie dokumenty są przechowywane bezpiecznie w pamięci przeglądarki.
+            </p>
+          </div>
+        ) : (
+          <>
         {activeTab === 'profil' && (
           <ProfileView
             profile={state.profile}
@@ -276,7 +451,9 @@ export default function App() {
             state={state}
             onImportState={(nextState) => {
               setState(nextState);
+              setYearFilter('all');
               setActiveTab('kreator');
+              void saveAppStateImmediate(nextState, { replaceAll: true });
             }}
             onRequestFullReset={() => setConfirmDialog({ kind: 'reset_all' })}
           />
@@ -287,7 +464,12 @@ export default function App() {
             <DocumentSidebar
               documents={state.documents}
               activeDocumentId={activeDoc?.id ?? null}
+              availableYears={availableYears}
+              yearFilter={yearFilter}
+              currentProfileYear={state.profile.schoolYear.trim()}
               printMode={printMode}
+              printBatchCount={yearScopedDocuments.length}
+              onChangeYearFilter={handleChangeYearFilter}
               onChangePrintMode={setPrintMode}
               onSelectDocument={(id) =>
                 setState((prev) => ({ ...prev, activeDocumentId: id }))
@@ -297,6 +479,7 @@ export default function App() {
               onRequestDeleteDocument={(doc) =>
                 setConfirmDialog({ kind: 'delete_doc', doc })
               }
+              onOpenNewYearModal={() => setRolloverOpen(true)}
             />
 
             {/* Editor + Live Print Preview Workspace */}
@@ -317,7 +500,11 @@ export default function App() {
                     <span>
                       Profil: <strong className="text-slate-900">{state.profile.fullName}</strong>
                       <span className="mx-1.5" aria-hidden="true">·</span>
-                      <span>Zapisano lokalnie</span>
+                      <span>
+                        {storageBackend === 'indexeddb'
+                          ? 'Zapisano w IndexedDB'
+                          : 'Tryb tymczasowy (IndexedDB zablokowane)'}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -387,7 +574,7 @@ export default function App() {
                     Brak aktywnego dokumentu
                   </h2>
                   <p className="mt-1 max-w-md text-sm text-slate-600">
-                    Wybierz typ dokumentu z panelu po lewej stronie, aby rozpocząć tworzenie sprawozdania.
+                    Wybierz typ dokumentu z panelu po lewej stronie lub przenieś wybrane karty z poprzedniego roku szkolnego.
                   </p>
                   <button
                     type="button"
@@ -459,7 +646,11 @@ export default function App() {
                     <div className="overflow-auto bg-slate-100/90 p-4 md:p-6 custom-scrollbar">
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs font-medium text-slate-600">
-                          Podgląd wydruku A4 ({printMode === 'all' ? `komplet: ${docsToPrint.length} dok.` : 'bieżąca karta'})
+                          Podgląd wydruku A4 (
+                          {printMode === 'all'
+                            ? `komplet${yearFilter !== 'all' ? ` ${yearFilter}` : ''}: ${docsToPrint.length} dok.`
+                            : 'bieżąca karta'}
+                          )
                         </span>
                         <div className="flex items-center gap-1 rounded-md border border-slate-300 bg-white p-0.5 text-xs">
                           {[0.5, 0.72, 0.88, 1].map((z) => (
@@ -503,6 +694,8 @@ export default function App() {
             </div>
           </div>
         )}
+          </>
+        )}
       </main>
 
       {/* Dedicated isolated print containers (separated from interactive UI) */}
@@ -529,6 +722,17 @@ export default function App() {
         onInsert={handleInsertConclusion}
         onAddCustomWniosek={handleAddCustomWniosek}
         onDeleteCustomWniosek={handleDeleteCustomWniosek}
+      />
+
+      <NewYearRolloverModal
+        isOpen={rolloverOpen}
+        documents={state.documents}
+        availableYears={availableYears}
+        defaultSourceYear={
+          yearFilter !== 'all' ? yearFilter : state.profile.schoolYear || availableYears[0] || ''
+        }
+        onClose={() => setRolloverOpen(false)}
+        onConfirmRollover={handleRolloverToNewYear}
       />
 
       <ConfirmModal

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Check, Plus, RefreshCw, X } from 'lucide-react';
-import { SemesterType, TeacherProfile } from '../types/reports';
+import { Check, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { SemesterType, SubjectAssignment, TeacherProfile } from '../types/reports';
+import { createId } from '../utils/documentFactory';
 import { Field, SectionHeader, inputClass } from './forms/FormPrimitives';
 
 interface ProfileViewProps {
@@ -17,11 +18,27 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onApplyToAllDocuments,
 }) => {
   const [newClassInput, setNewClassInput] = useState('');
-  const [newSubjectInput, setNewSubjectInput] = useState('');
+  const [newSubject, setNewSubject] = useState('');
+  const [newProgramNumber, setNewProgramNumber] = useState('');
+  const [newTextbookTitle, setNewTextbookTitle] = useState('');
   const [syncConfirmed, setSyncConfirmed] = useState(false);
 
   const update = (patch: Partial<TeacherProfile>) => {
     onChange({ ...profile, ...patch });
+  };
+
+  const updateAssignments = (nextAssignments: SubjectAssignment[]) => {
+    const derivedSubjectsList = Array.from(
+      new Set(
+        nextAssignments
+          .map((a) => a.subject.trim())
+          .filter((s) => s.length > 0)
+      )
+    );
+    update({
+      subjectAssignments: nextAssignments,
+      subjectsList: derivedSubjectsList,
+    });
   };
 
   const addClass = () => {
@@ -35,15 +52,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     update({ classesList: profile.classesList.filter((c) => c !== cls) });
   };
 
-  const addSubject = () => {
-    const val = newSubjectInput.trim();
-    if (!val || profile.subjectsList.includes(val)) return;
-    update({ subjectsList: [...profile.subjectsList, val] });
-    setNewSubjectInput('');
+  const addAssignment = () => {
+    const subj = newSubject.trim();
+    if (!subj) return;
+    const entry: SubjectAssignment = {
+      id: createId(),
+      subject: subj,
+      programNumber: newProgramNumber.trim(),
+      textbookTitle: newTextbookTitle.trim(),
+    };
+    updateAssignments([...profile.subjectAssignments, entry]);
+    setNewSubject('');
+    setNewProgramNumber('');
+    setNewTextbookTitle('');
   };
 
-  const removeSubject = (subj: string) => {
-    update({ subjectsList: profile.subjectsList.filter((s) => s !== subj) });
+  const updateAssignmentItem = (id: string, patch: Partial<SubjectAssignment>) => {
+    updateAssignments(
+      profile.subjectAssignments.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  };
+
+  const removeAssignment = (id: string) => {
+    updateAssignments(profile.subjectAssignments.filter((item) => item.id !== id));
   };
 
   const handleSync = () => {
@@ -60,7 +91,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             Wspólny profil nauczyciela i specjalisty
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Dane wpisane poniżej podstawiają się automatycznie do każdego nowo tworzonego formularza.
+            Dane wpisane poniżej oraz przypisane programy i podręczniki podstawiają się automatycznie do nowo tworzonych kart.
           </p>
         </div>
 
@@ -69,16 +100,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             type="button"
             onClick={handleSync}
             className="inline-flex items-center gap-2 rounded-lg border border-blue-900 bg-white px-4 py-2 text-xs font-semibold text-blue-900 hover:bg-blue-50 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            title="Aktualizuje dane nauczyciela, szkoły oraz programy/podręczniki w kartach z bieżącego roku (bez zmiany roku archiwalnych kart)"
           >
             {syncConfirmed ? (
               <>
                 <Check className="w-4 h-4 text-emerald-700" />
-                <span>Zaktualizowano karty ({documentsCount})</span>
+                <span>Zaktualizowano bieżący rok</span>
               </>
             ) : (
               <>
                 <RefreshCw className="w-4 h-4" />
-                <span>Zastosuj do istniejących kart ({documentsCount})</span>
+                <span>Zastosuj do kart z {profile.schoolYear || 'bieżącego roku'}</span>
               </>
             )}
           </button>
@@ -113,7 +145,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               />
             </Field>
 
-            <Field label="Rok szkolny">
+            <Field label="Bieżący rok szkolny">
               <input
                 type="text"
                 value={profile.schoolYear}
@@ -209,104 +241,181 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <section>
           <SectionHeader
             index="02"
-            title="Słownik Twoich klas i przedmiotów"
-            subtitle="Ułatwia szybkie podpowiadanie podczas tworzenia wielu kart w jednej sesji"
+            title="Nauczane klasy"
+            subtitle="Podpowiadane podczas tworzenia kart dla poszczególnych oddziałów"
+          />
+          <div className="space-y-3">
+            <div className="flex gap-2 max-w-md">
+              <input
+                type="text"
+                value={newClassInput}
+                onChange={(e) => setNewClassInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addClass();
+                  }
+                }}
+                placeholder="np. 6A"
+                className={inputClass}
+              />
+              <button
+                type="button"
+                onClick={addClass}
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 shrink-0 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Dodaj klasę</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {profile.classesList.map((cls) => (
+                <span
+                  key={cls}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800"
+                >
+                  <span>{cls}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeClass(cls)}
+                    className="text-slate-400 hover:text-red-700 cursor-pointer"
+                    aria-label={`Usuń klasę ${cls}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <SectionHeader
+            index="03"
+            title="Stałe przypisanie przedmiotów, programów i podręczników"
+            subtitle="Po wpisaniu lub wyborze przedmiotu w karcie sprawozdania numer programu oraz podręcznik podstawią się automatycznie"
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Classes */}
-            <div className="space-y-3">
-              <label className="block text-xs font-medium text-slate-700">
-                Nauczane klasy / oddziały
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newClassInput}
-                  onChange={(e) => setNewClassInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addClass();
-                    }
-                  }}
-                  placeholder="np. 6A"
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  onClick={addClass}
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 shrink-0 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Dodaj</span>
-                </button>
+          {/* Existing subject assignments */}
+          <div className="space-y-3 mb-5">
+            {profile.subjectAssignments.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
+                Brak przypisanych przedmiotów. Dodaj pierwszy przedmiot i jego program poniżej.
               </div>
-              <div className="flex flex-wrap gap-2">
-                {profile.classesList.map((cls) => (
-                  <span
-                    key={cls}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800"
-                  >
-                    <span>{cls}</span>
+            ) : (
+              profile.subjectAssignments.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end rounded-lg border border-slate-200 bg-slate-50/70 p-3.5"
+                >
+                  <div className="md:col-span-3">
+                    <Field label="Przedmiot / zajęcia">
+                      <input
+                        type="text"
+                        value={item.subject}
+                        onChange={(e) =>
+                          updateAssignmentItem(item.id, { subject: e.target.value })
+                        }
+                        placeholder="np. Matematyka"
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
+                  <div className="md:col-span-4">
+                    <Field label="Numer programu nauczania">
+                      <input
+                        type="text"
+                        value={item.programNumber}
+                        onChange={(e) =>
+                          updateAssignmentItem(item.id, { programNumber: e.target.value })
+                        }
+                        placeholder="np. DKOS-5002-12/18"
+                        className={`${inputClass} font-mono-tabular`}
+                      />
+                    </Field>
+                  </div>
+                  <div className="md:col-span-4">
+                    <Field label="Tytuł i autor podręcznika">
+                      <input
+                        type="text"
+                        value={item.textbookTitle}
+                        onChange={(e) =>
+                          updateAssignmentItem(item.id, { textbookTitle: e.target.value })
+                        }
+                        placeholder="np. Matematyka z plusem, GWO"
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
+                  <div className="md:col-span-1 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => removeClass(cls)}
-                      className="text-slate-400 hover:text-red-700 cursor-pointer"
-                      aria-label={`Usuń klasę ${cls}`}
+                      onClick={() => removeAssignment(item.id)}
+                      className="rounded-lg border border-slate-200 bg-white p-2 text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors cursor-pointer"
+                      aria-label={`Usuń przypisanie ${item.subject}`}
+                      title="Usuń przypisanie"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
-                  </span>
-                ))}
-              </div>
-            </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-            {/* Subjects */}
-            <div className="space-y-3">
-              <label className="block text-xs font-medium text-slate-700">
-                Prowadzone przedmioty / zajęcia
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newSubjectInput}
-                  onChange={(e) => setNewSubjectInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addSubject();
-                    }
-                  }}
-                  placeholder="np. Informatyka"
-                  className={inputClass}
-                />
+          {/* Add new assignment row */}
+          <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-700">Dodaj nowy przedmiot i program</p>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-3">
+                <Field label="Przedmiot">
+                  <input
+                    type="text"
+                    value={newSubject}
+                    onChange={(e) => setNewSubject(e.target.value)}
+                    placeholder="np. Informatyka"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+              <div className="md:col-span-3">
+                <Field label="Nr programu">
+                  <input
+                    type="text"
+                    value={newProgramNumber}
+                    onChange={(e) => setNewProgramNumber(e.target.value)}
+                    placeholder="np. DKOS-..."
+                    className={`${inputClass} font-mono-tabular`}
+                  />
+                </Field>
+              </div>
+              <div className="md:col-span-4">
+                <Field label="Podręcznik">
+                  <input
+                    type="text"
+                    value={newTextbookTitle}
+                    onChange={(e) => setNewTextbookTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addAssignment();
+                      }
+                    }}
+                    placeholder="Tytuł i wydawnictwo / autor"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+              <div className="md:col-span-2">
                 <button
                   type="button"
-                  onClick={addSubject}
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 shrink-0 cursor-pointer"
+                  onClick={addAssignment}
+                  disabled={!newSubject.trim()}
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-900 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Dodaj</span>
                 </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {profile.subjectsList.map((subj) => (
-                  <span
-                    key={subj}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800"
-                  >
-                    <span>{subj}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeSubject(subj)}
-                      className="text-slate-400 hover:text-red-700 cursor-pointer"
-                      aria-label={`Usuń przedmiot ${subj}`}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                ))}
               </div>
             </div>
           </div>
