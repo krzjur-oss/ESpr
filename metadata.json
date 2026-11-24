@@ -1,0 +1,6 @@
+{
+  "name": "E-Sprawozdania — Kreator Sprawozdań Szkolnych",
+  "description": "Nowoczesna aplikacja Local-First PWA dla nauczycieli i specjalistów szkoły do tworzenia, podglądu i drukowania sprawozdań semestralnych i rocznych offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
