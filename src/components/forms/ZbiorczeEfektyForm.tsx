@@ -4,6 +4,7 @@ import {
   CURRICULUM_STATUS_LABELS,
   CurriculumStatus,
   ReportDocument,
+  TeacherProfile,
   ZbiorczeEfektyDoc,
   ZbiorczeRow,
 } from '../../types/reports';
@@ -17,13 +18,24 @@ import {
   Field,
   FormTopBar,
   SectionHeader,
+  TemplateTextareaField,
   inputClass,
-  textareaClass,
 } from './FormPrimitives';
+import {
+  ProfileComboInput,
+  getProfileClassOptions,
+  getProfileDateOptions,
+  getProfileSchoolOptions,
+  getProfileSubjectOptions,
+  getProfileTeacherOptions,
+  getProfileYearOptions,
+} from './ProfileComboInput';
 
 interface Props {
   doc: ZbiorczeEfektyDoc;
   allDocuments: ReportDocument[];
+  profile: TeacherProfile;
+  availableYears?: string[];
   onChange: (updated: ZbiorczeEfektyDoc) => void;
   onOpenConclusionsPicker: () => void;
   onRequestReset: () => void;
@@ -32,11 +44,28 @@ interface Props {
 export const ZbiorczeEfektyForm: React.FC<Props> = ({
   doc,
   allDocuments,
+  profile,
+  availableYears = [],
   onChange,
   onOpenConclusionsPicker,
   onRequestReset,
 }) => {
   const subjectCardsCount = getMatchingSubjectCardsForCoordinator(allDocuments, doc).length;
+  const sessionTeacherNames = Array.from(
+    new Set(
+      allDocuments
+        .filter((d) => d.type === 'efekty_nauczania')
+        .map((d) => d.teacherName.trim())
+        .filter(Boolean)
+    )
+  );
+  const subjectStageOptions = [
+    ...getProfileSubjectOptions(profile),
+    {
+      value: 'Edukacja wczesnoszkolna (klasy I–III)',
+      subtitle: 'Wariant edukacji wczesnoszkolnej',
+    },
+  ];
 
   const update = (patch: Partial<ZbiorczeEfektyDoc>) => {
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
@@ -129,21 +158,22 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Nazwa szkoły / placówki">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.schoolName}
-                onChange={(e) => update({ schoolName: e.target.value })}
+                onChange={(val) => update({ schoolName: val })}
+                options={getProfileSchoolOptions(profile)}
                 placeholder="Nazwa szkoły"
-                className={inputClass}
+                dropdownHeader="Szkoła zapisana w Profilu"
               />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Rok szkolny">
-                <input
-                  type="text"
+                <ProfileComboInput
                   value={doc.schoolYear}
-                  onChange={(e) => update({ schoolYear: e.target.value })}
+                  onChange={(val) => update({ schoolYear: val })}
+                  options={getProfileYearOptions(profile, availableYears)}
                   className={`${inputClass} font-mono-tabular`}
+                  dropdownHeader="Lata szkolne z Profilu i archiwum"
                 />
               </Field>
               <Field label="Semestr">
@@ -167,21 +197,21 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
             </div>
 
             <Field label="Przedmiot / etap edukacyjny">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.subjectOrStage}
-                onChange={(e) => update({ subjectOrStage: e.target.value })}
+                onChange={(val) => update({ subjectOrStage: val })}
+                options={subjectStageOptions}
                 placeholder="np. Matematyka lub Edukacja wczesnoszkolna (klasy I–III)"
-                className={inputClass}
+                dropdownHeader="Przedmioty z Profilu i etapy"
               />
             </Field>
             <Field label="Imię i nazwisko koordynatora">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.coordinatorName}
-                onChange={(e) => update({ coordinatorName: e.target.value })}
+                onChange={(val) => update({ coordinatorName: val })}
+                options={getProfileTeacherOptions(profile, sessionTeacherNames)}
                 placeholder="Imię i nazwisko koordynatora"
-                className={inputClass}
+                dropdownHeader="Dane z Profilu i kart"
               />
             </Field>
           </div>
@@ -246,21 +276,21 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <Field label="Klasa">
-                  <input
-                    type="text"
+                  <ProfileComboInput
                     value={row.className}
-                    onChange={(e) => updateRow(row.id, { className: e.target.value })}
+                    onChange={(val) => updateRow(row.id, { className: val })}
+                    options={getProfileClassOptions(profile)}
                     placeholder="np. 4A"
-                    className={inputClass}
+                    dropdownHeader="Klasy z Profilu"
                   />
                 </Field>
                 <Field label="Nauczyciel">
-                  <input
-                    type="text"
+                  <ProfileComboInput
                     value={row.teacherName}
-                    onChange={(e) => updateRow(row.id, { teacherName: e.target.value })}
+                    onChange={(val) => updateRow(row.id, { teacherName: val })}
+                    options={getProfileTeacherOptions(profile, sessionTeacherNames)}
                     placeholder="Imię i nazwisko"
-                    className={inputClass}
+                    dropdownHeader="Nauczyciele z Profilu i kart"
                   />
                 </Field>
                 <Field label="Podstawa programowa">
@@ -328,24 +358,22 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
 
         {doc.mode === 'wczesnoszkolna' && (
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Obszary mocne w edukacji wczesnoszkolnej (klasy I–III)">
-              <textarea
-                rows={4}
-                value={doc.earlyEdStrongAreas}
-                onChange={(e) => update({ earlyEdStrongAreas: e.target.value })}
-                placeholder="Np. technika głośnego czytania, aktywność plastyczna, integracja zespołów klasowych..."
-                className={textareaClass}
-              />
-            </Field>
-            <Field label="Obszary słabsze / wymagające wsparcia (klasy I–III)">
-              <textarea
-                rows={4}
-                value={doc.earlyEdWeakAreas}
-                onChange={(e) => update({ earlyEdWeakAreas: e.target.value })}
-                placeholder="Np. czytanie ze zrozumieniem zadań tekstowych, poprawność ortograficzna, grafomotoryka..."
-                className={textareaClass}
-              />
-            </Field>
+            <TemplateTextareaField
+              label="Obszary mocne w edukacji wczesnoszkolnej (klasy I–III)"
+              category="oceny_wyniki"
+              rows={4}
+              value={doc.earlyEdStrongAreas}
+              onChange={(val) => update({ earlyEdStrongAreas: val })}
+              placeholder="Np. technika głośnego czytania, aktywność plastyczna, integracja zespołów klasowych..."
+            />
+            <TemplateTextareaField
+              label="Obszary słabsze / wymagające wsparcia (klasy I–III)"
+              category="oceny_wyniki"
+              rows={4}
+              value={doc.earlyEdWeakAreas}
+              onChange={(val) => update({ earlyEdWeakAreas: val })}
+              placeholder="Np. czytanie ze zrozumieniem zadań tekstowych, poprawność ortograficzna, grafomotoryka..."
+            />
           </div>
         )}
       </section>
@@ -357,33 +385,30 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
           title="Osiągnięcia, wyjazdy i realizacja programu wychowawczo-profilaktycznego"
         />
         <div className="space-y-4">
-          <Field label="Zbiorcze osiągnięcia i udział w konkursach / zawodach">
-            <textarea
-              rows={3}
-              value={doc.achievements}
-              onChange={(e) => update({ achievements: e.target.value })}
-              placeholder="Zestawienie konkursów szkolnych i międzyszkolnych oraz sukcesów uczniów..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Wyjazdy edukacyjne w ramach realizacji podstawy programowej">
-            <textarea
-              rows={2}
-              value={doc.educationalTrips}
-              onChange={(e) => update({ educationalTrips: e.target.value })}
-              placeholder="Zrealizowane wyjścia, warsztaty wyjazdowe, wycieczki przedmiotowe..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Realizacja programu wychowawczo-profilaktycznego">
-            <textarea
-              rows={3}
-              value={doc.preventiveProgram}
-              onChange={(e) => update({ preventiveProgram: e.target.value })}
-              placeholder="Działania wychowawcze i profilaktyczne zrealizowane przez zespół..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Zbiorcze osiągnięcia i udział w konkursach / zawodach"
+            category="sciezka_konkursy_wyjazdy"
+            rows={3}
+            value={doc.achievements}
+            onChange={(val) => update({ achievements: val })}
+            placeholder="Zestawienie konkursów szkolnych i międzyszkolnych oraz sukcesów uczniów..."
+          />
+          <TemplateTextareaField
+            label="Wyjazdy edukacyjne w ramach realizacji podstawy programowej"
+            category="sciezka_konkursy_wyjazdy"
+            rows={2}
+            value={doc.educationalTrips}
+            onChange={(val) => update({ educationalTrips: val })}
+            placeholder="Zrealizowane wyjścia, warsztaty wyjazdowe, wycieczki przedmiotowe..."
+          />
+          <TemplateTextareaField
+            label="Realizacja programu wychowawczo-profilaktycznego"
+            category="program_profilaktyczny"
+            rows={3}
+            value={doc.preventiveProgram}
+            onChange={(val) => update({ preventiveProgram: val })}
+            placeholder="Działania wychowawcze i profilaktyczne zrealizowane przez zespół..."
+          />
         </div>
       </section>
 
@@ -391,15 +416,14 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
       <section>
         <SectionHeader index="04" title="Wnioski zespołu i podpis koordynatora" />
         <div className="space-y-4">
-          <Field label="Stopień realizacji wniosków z poprzedniego roku szkolnego">
-            <textarea
-              rows={3}
-              value={doc.previousConclusionsStatus}
-              onChange={(e) => update({ previousConclusionsStatus: e.target.value })}
-              placeholder="Podsumowanie wdrożenia wniosków z ubiegłego roku..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Stopień realizacji wniosków z poprzedniego roku szkolnego"
+            category="wnioski_ewaluacja"
+            rows={3}
+            value={doc.previousConclusionsStatus}
+            onChange={(val) => update({ previousConclusionsStatus: val })}
+            placeholder="Podsumowanie wdrożenia wniosków z ubiegłego roku..."
+          />
 
           <ConclusionsField
             label="Wnioski do dalszej pracy"
@@ -412,11 +436,12 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
 
           <div className="max-w-xs">
             <Field label="Data sporządzenia sprawozdania">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.signatureDate}
-                onChange={(e) => update({ signatureDate: e.target.value })}
+                onChange={(val) => update({ signatureDate: val })}
+                options={getProfileDateOptions(profile)}
                 className={`${inputClass} font-mono-tabular`}
+                dropdownHeader="Data z Profilu lub bieżąca"
               />
             </Field>
           </div>

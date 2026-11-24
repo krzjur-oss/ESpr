@@ -12,10 +12,18 @@ import { AboutSection, AboutView } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { DocumentSidebar } from './components/DocumentSidebar';
+import { DocumentSidebar, DocumentSortOption } from './components/DocumentSidebar';
 import { NewYearRolloverModal } from './components/NewYearRolloverModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ProfileView } from './components/ProfileView';
+import { SaveTemplateModal } from './components/SaveTemplateModal';
+import {
+  PhrasesImportPayload,
+  PhrasesImportSummary,
+  SharePhrasesModal,
+  SharePhrasesModalMode,
+} from './components/SharePhrasesModal';
+import { TemplatePickerModal } from './components/TemplatePickerModal';
 import { TopBar } from './components/TopBar';
 import { WnioskiDatabaseView } from './components/WnioskiDatabaseView';
 import { EfektyNauczaniaForm } from './components/forms/EfektyNauczaniaForm';
@@ -23,15 +31,24 @@ import { KartaInformacyjnaForm } from './components/forms/KartaInformacyjnaForm'
 import { PodsumowanieSpecjalistyForm } from './components/forms/PodsumowanieSpecjalistyForm';
 import { ZbiorczeEfektyForm } from './components/forms/ZbiorczeEfektyForm';
 import { PrintDocumentRenderer } from './components/print/PrintDocumentRenderer';
+import {
+  OpenSaveTemplateParams,
+  OpenTemplatePickerParams,
+  TemplatesProvider,
+} from './context/TemplatesContext';
 import { suggestCategoryIdForDocument } from './data/wnioskiDatabase';
 import {
   AppState,
+  CustomTemplateEntry,
+  DOCUMENT_TYPE_LABELS,
   DocumentType,
   MainTab,
   ReportDocument,
+  SPECIALIST_ROLE_LABELS,
   SemesterType,
   SpecialistRole,
   TeacherProfile,
+  TemplateSectionCategory,
 } from './types/reports';
 import {
   clearDocumentFields,
@@ -46,6 +63,8 @@ import { printElementIsolated } from './utils/printDocument';
 import {
   flushPendingAppStateSave,
   loadAppState,
+  mergeImportedTemplates,
+  mergeImportedWnioski,
   resetAllStoredState,
   saveAppStateImmediate,
   scheduleSaveAppState,
@@ -64,12 +83,22 @@ export default function App() {
   const [layoutMode, setLayoutMode] = useState<EditorLayoutMode>('split');
   const [printMode, setPrintMode] = useState<'active' | 'all'>('active');
   const [yearFilter, setYearFilter] = useState<string>('all');
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
+  const [sidebarSortBy, setSidebarSortBy] = useState<DocumentSortOption>('newest');
+  const [selectedPrintIds, setSelectedPrintIds] = useState<string[]>([]);
   const [previewZoom, setPreviewZoom] = useState<number>(0.72);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [rolloverOpen, setRolloverOpen] = useState(false);
+  const [templatePickerTarget, setTemplatePickerTarget] =
+    useState<OpenTemplatePickerParams | null>(null);
+  const [saveTemplateDraft, setSaveTemplateDraft] =
+    useState<OpenSaveTemplateParams | null>(null);
+  const [sharePhrasesModalMode, setSharePhrasesModalMode] =
+    useState<SharePhrasesModalMode | null>(null);
 
   const activePrintRef = useRef<HTMLDivElement | null>(null);
   const batchPrintRef = useRef<HTMLDivElement | null>(null);
+  const sidebarBatchPrintRef = useRef<HTMLDivElement | null>(null);
 
   const [confirmDialog, setConfirmDialog] = useState<
     | { kind: 'delete_doc'; doc: ReportDocument }
@@ -142,6 +171,59 @@ export default function App() {
     );
   }, [state.documents, yearFilter]);
 
+  const sidebarFilteredDocuments = useMemo(() => {
+    const q = sidebarSearchQuery.trim().toLowerCase();
+    const filtered = state.documents.filter((doc) => {
+      const docYear = doc.schoolYear?.trim() || 'Bez roku';
+      if (yearFilter !== 'all' && docYear !== yearFilter) {
+        return false;
+      }
+      if (!q) return true;
+      const title = (doc.title || '').toLowerCase();
+      const typeLabel = DOCUMENT_TYPE_LABELS[doc.type].toLowerCase();
+      const roleLabel =
+        doc.type === 'podsumowanie_specjalisty'
+          ? SPECIALIST_ROLE_LABELS[doc.role].toLowerCase()
+          : '';
+      return (
+        title.includes(q) ||
+        typeLabel.includes(q) ||
+        roleLabel.includes(q) ||
+        docYear.toLowerCase().includes(q)
+      );
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sidebarSortBy === 'title_asc') {
+        const titleA = (a.title || DOCUMENT_TYPE_LABELS[a.type]).trim();
+        const titleB = (b.title || DOCUMENT_TYPE_LABELS[b.type]).trim();
+        return titleA.localeCompare(titleB, 'pl', { sensitivity: 'base', numeric: true });
+      }
+      const timeA = Date.parse(a.createdAt) || 0;
+      const timeB = Date.parse(b.createdAt) || 0;
+      if (timeA !== timeB) {
+        return sidebarSortBy === 'newest' ? timeB - timeA : timeA - timeB;
+      }
+      const titleA = (a.title || DOCUMENT_TYPE_LABELS[a.type]).trim();
+      const titleB = (b.title || DOCUMENT_TYPE_LABELS[b.type]).trim();
+      return titleA.localeCompare(titleB, 'pl', { sensitivity: 'base', numeric: true });
+    });
+  }, [state.documents, yearFilter, sidebarSearchQuery, sidebarSortBy]);
+
+  const selectedBatchDocuments = useMemo(() => {
+    if (selectedPrintIds.length === 0) return [];
+    const selectedSet = new Set(selectedPrintIds);
+    return sidebarFilteredDocuments.filter((d) => selectedSet.has(d.id));
+  }, [sidebarFilteredDocuments, selectedPrintIds]);
+
+  const batchDocuments = useMemo(
+    () =>
+      selectedBatchDocuments.length > 0
+        ? selectedBatchDocuments
+        : sidebarFilteredDocuments,
+    [selectedBatchDocuments, sidebarFilteredDocuments]
+  );
+
   const activeDoc = useMemo(
     () =>
       state.documents.find((d) => d.id === state.activeDocumentId) ??
@@ -157,9 +239,9 @@ export default function App() {
   );
 
   const docsToPrint = useMemo(() => {
-    if (printMode === 'all') return yearScopedDocuments;
+    if (printMode === 'all') return batchDocuments;
     return activeDoc ? [activeDoc] : [];
-  }, [printMode, yearScopedDocuments, activeDoc]);
+  }, [printMode, batchDocuments, activeDoc]);
 
   const updateProfile = (profile: TeacherProfile) => {
     setState((prev) => ({ ...prev, profile }));
@@ -258,6 +340,7 @@ export default function App() {
 
   const handleChangeYearFilter = (nextYear: string) => {
     setYearFilter(nextYear);
+    setSelectedPrintIds([]);
     if (nextYear !== 'all') {
       const firstInYear = state.documents.find(
         (d) => (d.schoolYear?.trim() || 'Bez roku') === nextYear
@@ -270,6 +353,22 @@ export default function App() {
         setState((prev) => ({ ...prev, activeDocumentId: firstInYear.id }));
       }
     }
+  };
+
+  const handleTogglePrintSelect = (id: string) => {
+    setSelectedPrintIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllFiltered = () => {
+    const filteredIds = sidebarFilteredDocuments.map((d) => d.id);
+    if (filteredIds.length === 0) return;
+    setSelectedPrintIds(filteredIds);
+  };
+
+  const handleClearPrintSelection = () => {
+    setSelectedPrintIds([]);
   };
 
   const handleRolloverToNewYear = (params: {
@@ -349,6 +448,69 @@ export default function App() {
     }));
   };
 
+  const handleAddCustomTemplate = (
+    title: string,
+    category: TemplateSectionCategory,
+    content: string
+  ) => {
+    const cleanedContent = content.trim();
+    if (!cleanedContent) return;
+    const cleanedTitle = title.trim() || cleanedContent.slice(0, 48);
+    setState((prev) => ({
+      ...prev,
+      customTemplates: [
+        {
+          id: createId(),
+          title: cleanedTitle,
+          category,
+          content: cleanedContent,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev.customTemplates,
+      ],
+    }));
+  };
+
+  const handleUpdateCustomTemplate = (
+    id: string,
+    patch: Partial<Pick<CustomTemplateEntry, 'title' | 'category' | 'content'>>
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      customTemplates: prev.customTemplates.map((tpl) =>
+        tpl.id === id ? { ...tpl, ...patch } : tpl
+      ),
+    }));
+  };
+
+  const handleDeleteCustomTemplate = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      customTemplates: prev.customTemplates.filter((tpl) => tpl.id !== id),
+    }));
+  };
+
+  const handleImportPhrases = (payload: PhrasesImportPayload): PhrasesImportSummary => {
+    const wnioskiOutcome = payload.includeWnioski
+      ? mergeImportedWnioski(state.customWnioski, payload.incomingWnioski, payload.mode)
+      : { entries: state.customWnioski, added: 0, skippedDuplicates: 0 };
+    const templatesOutcome = payload.includeTemplates
+      ? mergeImportedTemplates(state.customTemplates, payload.incomingTemplates, payload.mode)
+      : { entries: state.customTemplates, added: 0, skippedDuplicates: 0 };
+
+    setState((prev) => ({
+      ...prev,
+      customWnioski: wnioskiOutcome.entries,
+      customTemplates: templatesOutcome.entries,
+    }));
+
+    return {
+      addedWnioski: wnioskiOutcome.added,
+      addedTemplates: templatesOutcome.added,
+      skippedDuplicates: wnioskiOutcome.skippedDuplicates + templatesOutcome.skippedDuplicates,
+    };
+  };
+
   const handleConfirmAction = () => {
     if (!confirmDialog) return;
     if (confirmDialog.kind === 'delete_doc') {
@@ -383,6 +545,15 @@ export default function App() {
     printElementIsolated(
       activePrintRef.current,
       activeDoc.title || 'Sprawozdanie szkolne'
+    );
+  };
+
+  const handlePrintBatch = () => {
+    if (batchDocuments.length === 0) return;
+    const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
+    printElementIsolated(
+      sidebarBatchPrintRef.current,
+      `Komplet sprawozdań${yearSuffix} - ${batchDocuments.length} dok.`
     );
   };
 
@@ -440,11 +611,16 @@ export default function App() {
         {activeTab === 'baza_wnioskow' && (
           <WnioskiDatabaseView
             customWnioski={state.customWnioski}
+            customTemplates={state.customTemplates}
             canInsertIntoActive={canInsertConclusionsToActive}
             activeDocumentTitle={activeDoc?.title}
             onInsertToActive={(text) => handleInsertConclusion(text, 'append')}
             onAddCustomWniosek={handleAddCustomWniosek}
             onDeleteCustomWniosek={handleDeleteCustomWniosek}
+            onAddCustomTemplate={handleAddCustomTemplate}
+            onUpdateCustomTemplate={handleUpdateCustomTemplate}
+            onDeleteCustomTemplate={handleDeleteCustomTemplate}
+            onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
           />
         )}
 
@@ -458,6 +634,7 @@ export default function App() {
               void saveAppStateImmediate(nextState, { replaceAll: true });
             }}
             onRequestFullReset={() => setConfirmDialog({ kind: 'reset_all' })}
+            onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
           />
         )}
 
@@ -472,14 +649,25 @@ export default function App() {
           <div className="flex-1 flex flex-col lg:flex-row max-w-[1440px] w-full mx-auto bg-white border-x border-slate-200/80">
             <DocumentSidebar
               documents={state.documents}
+              filteredDocuments={sidebarFilteredDocuments}
               activeDocumentId={activeDoc?.id ?? null}
               availableYears={availableYears}
               yearFilter={yearFilter}
+              searchQuery={sidebarSearchQuery}
+              sortBy={sidebarSortBy}
               currentProfileYear={state.profile.schoolYear.trim()}
               printMode={printMode}
-              printBatchCount={yearScopedDocuments.length}
+              selectedPrintIds={selectedPrintIds}
+              batchDocumentsCount={batchDocuments.length}
+              selectedBatchCount={selectedBatchDocuments.length}
               onChangeYearFilter={handleChangeYearFilter}
+              onChangeSearchQuery={setSidebarSearchQuery}
+              onChangeSortBy={setSidebarSortBy}
               onChangePrintMode={setPrintMode}
+              onTogglePrintSelect={handleTogglePrintSelect}
+              onToggleSelectAllFiltered={handleToggleSelectAllFiltered}
+              onClearPrintSelection={handleClearPrintSelection}
+              onPrintBatch={handlePrintBatch}
               onSelectDocument={(id) =>
                 setState((prev) => ({ ...prev, activeDocumentId: id }))
               }
@@ -605,47 +793,61 @@ export default function App() {
                   {layoutMode !== 'preview' && (
                     <div className="overflow-y-auto p-5 md:p-8 bg-white border-r border-slate-200 custom-scrollbar">
                       <div className="mx-auto max-w-2xl">
-                        {activeDoc.type === 'efekty_nauczania' && (
-                          <EfektyNauczaniaForm
-                            doc={activeDoc}
-                            profile={state.profile}
-                            onChange={handleUpdateDocument}
-                            onOpenConclusionsPicker={() => setPickerOpen(true)}
-                            onRequestReset={() =>
-                              setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                            }
-                          />
-                        )}
-                        {activeDoc.type === 'zbiorcze_efekty' && (
-                          <ZbiorczeEfektyForm
-                            doc={activeDoc}
-                            allDocuments={state.documents}
-                            onChange={handleUpdateDocument}
-                            onOpenConclusionsPicker={() => setPickerOpen(true)}
-                            onRequestReset={() =>
-                              setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                            }
-                          />
-                        )}
-                        {activeDoc.type === 'karta_informacyjna' && (
-                          <KartaInformacyjnaForm
-                            doc={activeDoc}
-                            onChange={handleUpdateDocument}
-                            onRequestReset={() =>
-                              setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                            }
-                          />
-                        )}
-                        {activeDoc.type === 'podsumowanie_specjalisty' && (
-                          <PodsumowanieSpecjalistyForm
-                            doc={activeDoc}
-                            onChange={handleUpdateDocument}
-                            onOpenConclusionsPicker={() => setPickerOpen(true)}
-                            onRequestReset={() =>
-                              setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                            }
-                          />
-                        )}
+                        <TemplatesProvider
+                          value={{
+                            templatesCount: state.customTemplates.length,
+                            openTemplatePicker: setTemplatePickerTarget,
+                            openSaveTemplate: setSaveTemplateDraft,
+                          }}
+                        >
+                          {activeDoc.type === 'efekty_nauczania' && (
+                            <EfektyNauczaniaForm
+                              doc={activeDoc}
+                              profile={state.profile}
+                              availableYears={availableYears}
+                              onChange={handleUpdateDocument}
+                              onOpenConclusionsPicker={() => setPickerOpen(true)}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
+                          {activeDoc.type === 'zbiorcze_efekty' && (
+                            <ZbiorczeEfektyForm
+                              doc={activeDoc}
+                              allDocuments={state.documents}
+                              profile={state.profile}
+                              availableYears={availableYears}
+                              onChange={handleUpdateDocument}
+                              onOpenConclusionsPicker={() => setPickerOpen(true)}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
+                          {activeDoc.type === 'karta_informacyjna' && (
+                            <KartaInformacyjnaForm
+                              doc={activeDoc}
+                              profile={state.profile}
+                              onChange={handleUpdateDocument}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
+                          {activeDoc.type === 'podsumowanie_specjalisty' && (
+                            <PodsumowanieSpecjalistyForm
+                              doc={activeDoc}
+                              profile={state.profile}
+                              availableYears={availableYears}
+                              onChange={handleUpdateDocument}
+                              onOpenConclusionsPicker={() => setPickerOpen(true)}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
+                        </TemplatesProvider>
                       </div>
                     </div>
                   )}
@@ -755,6 +957,16 @@ export default function App() {
         {activeDoc && <PrintDocumentRenderer doc={activeDoc} isLast />}
       </div>
 
+      <div ref={sidebarBatchPrintRef} className="hidden" aria-hidden="true">
+        {batchDocuments.map((doc, index) => (
+          <PrintDocumentRenderer
+            key={doc.id}
+            doc={doc}
+            isLast={index === batchDocuments.length - 1}
+          />
+        ))}
+      </div>
+
       <div id="print-area" ref={batchPrintRef} className="hidden print:block print-only-root">
         {docsToPrint.map((doc, index) => (
           <PrintDocumentRenderer
@@ -774,6 +986,36 @@ export default function App() {
         onInsert={handleInsertConclusion}
         onAddCustomWniosek={handleAddCustomWniosek}
         onDeleteCustomWniosek={handleDeleteCustomWniosek}
+      />
+
+      <TemplatePickerModal
+        isOpen={templatePickerTarget !== null}
+        fieldLabel={templatePickerTarget?.fieldLabel ?? ''}
+        suggestedCategory={templatePickerTarget?.suggestedCategory ?? 'ogolne'}
+        customTemplates={state.customTemplates}
+        onClose={() => setTemplatePickerTarget(null)}
+        onInsert={(text, mode) => templatePickerTarget?.onApply(text, mode)}
+        onAddTemplate={handleAddCustomTemplate}
+        onDeleteTemplate={handleDeleteCustomTemplate}
+      />
+
+      <SaveTemplateModal
+        isOpen={saveTemplateDraft !== null}
+        fieldLabel={saveTemplateDraft?.fieldLabel ?? ''}
+        initialContent={saveTemplateDraft?.initialContent ?? ''}
+        suggestedCategory={saveTemplateDraft?.suggestedCategory ?? 'ogolne'}
+        fromSelection={saveTemplateDraft?.fromSelection ?? false}
+        onClose={() => setSaveTemplateDraft(null)}
+        onSave={handleAddCustomTemplate}
+      />
+
+      <SharePhrasesModal
+        isOpen={sharePhrasesModalMode !== null}
+        initialMode={sharePhrasesModalMode ?? 'export'}
+        customWnioski={state.customWnioski}
+        customTemplates={state.customTemplates}
+        onClose={() => setSharePhrasesModalMode(null)}
+        onImportPhrases={handleImportPhrases}
       />
 
       <NewYearRolloverModal

@@ -17,16 +17,29 @@ import {
   SpecialistRole,
 } from '../types/reports';
 
+export type DocumentSortOption = 'newest' | 'oldest' | 'title_asc';
+
 interface DocumentSidebarProps {
   documents: ReportDocument[];
+  filteredDocuments: ReportDocument[];
   activeDocumentId: string | null;
   availableYears: string[];
   yearFilter: string;
+  searchQuery: string;
+  sortBy: DocumentSortOption;
   currentProfileYear: string;
   printMode: 'active' | 'all';
-  printBatchCount: number;
+  selectedPrintIds: string[];
+  batchDocumentsCount: number;
+  selectedBatchCount: number;
   onChangeYearFilter: (year: string) => void;
+  onChangeSearchQuery: (query: string) => void;
+  onChangeSortBy: (sort: DocumentSortOption) => void;
   onChangePrintMode: (mode: 'active' | 'all') => void;
+  onTogglePrintSelect: (id: string) => void;
+  onToggleSelectAllFiltered: () => void;
+  onClearPrintSelection: () => void;
+  onPrintBatch: () => void;
   onSelectDocument: (id: string) => void;
   onAddDocument: (
     type: DocumentType,
@@ -39,14 +52,25 @@ interface DocumentSidebarProps {
 
 export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   documents,
+  filteredDocuments,
   activeDocumentId,
   availableYears,
   yearFilter,
+  searchQuery,
+  sortBy,
   currentProfileYear,
   printMode,
-  printBatchCount,
+  selectedPrintIds,
+  batchDocumentsCount,
+  selectedBatchCount,
   onChangeYearFilter,
+  onChangeSearchQuery,
+  onChangeSortBy,
   onChangePrintMode,
+  onTogglePrintSelect,
+  onToggleSelectAllFiltered,
+  onClearPrintSelection,
+  onPrintBatch,
   onSelectDocument,
   onAddDocument,
   onDuplicateDocument,
@@ -54,30 +78,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onOpenNewYearModal,
 }) => {
   const [showNewMenu, setShowNewMenu] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const filteredDocuments = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return documents.filter((doc) => {
-      const docYear = doc.schoolYear?.trim() || 'Bez roku';
-      if (yearFilter !== 'all' && docYear !== yearFilter) {
-        return false;
-      }
-      if (!q) return true;
-      const title = (doc.title || '').toLowerCase();
-      const typeLabel = DOCUMENT_TYPE_LABELS[doc.type].toLowerCase();
-      const roleLabel =
-        doc.type === 'podsumowanie_specjalisty'
-          ? SPECIALIST_ROLE_LABELS[doc.role].toLowerCase()
-          : '';
-      return (
-        title.includes(q) ||
-        typeLabel.includes(q) ||
-        roleLabel.includes(q) ||
-        docYear.toLowerCase().includes(q)
-      );
-    });
-  }, [documents, yearFilter, searchQuery]);
+  const selectedIdSet = useMemo(() => new Set(selectedPrintIds), [selectedPrintIds]);
 
   const groupedByYear = useMemo(() => {
     const map = new Map<string, ReportDocument[]>();
@@ -108,21 +109,32 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
   const renderDocCard = (doc: ReportDocument) => {
     const isActive = doc.id === activeDocumentId;
+    const isChecked = selectedIdSet.has(doc.id);
     return (
       <div
         key={doc.id}
         className={`group rounded-lg border transition-colors ${
           isActive
             ? 'border-blue-900 bg-blue-50/70'
-            : 'border-slate-200 bg-white hover:bg-slate-50'
+            : isChecked
+              ? 'border-blue-300 bg-blue-50/25 hover:bg-blue-50/40'
+              : 'border-slate-200 bg-white hover:bg-slate-50'
         }`}
       >
-        <button
-          type="button"
-          onClick={() => onSelectDocument(doc.id)}
-          className="w-full px-3 py-2.5 text-left cursor-pointer"
-        >
-          <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2 px-2.5 py-2.5">
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={() => onTogglePrintSelect(doc.id)}
+            aria-label={`Zaznacz „${doc.title || DOCUMENT_TYPE_LABELS[doc.type]}” do wydruku jako komplet`}
+            title="Zaznacz do druku jako komplet"
+            className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-blue-900 focus:ring-blue-900 cursor-pointer shrink-0"
+          />
+          <button
+            type="button"
+            onClick={() => onSelectDocument(doc.id)}
+            className="flex flex-1 items-start gap-1.5 text-left cursor-pointer min-w-0"
+          >
             <FileText
               className={`w-4 h-4 mt-0.5 shrink-0 ${
                 isActive ? 'text-blue-900' : 'text-slate-400'
@@ -140,8 +152,8 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                 {DOCUMENT_TYPE_LABELS[doc.type]}
               </p>
             </div>
-          </div>
-        </button>
+          </button>
+        </div>
 
         <div className="flex items-center justify-end gap-1 border-t border-slate-100 px-2 py-1">
           <button
@@ -168,7 +180,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   };
 
   return (
-    <aside className="w-full lg:w-[290px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col no-print">
+    <aside className="w-full lg:w-[300px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col no-print">
       {/* Add New Document Button + Dropdown */}
       <div className="p-4 border-b border-slate-200 relative space-y-2">
         <button
@@ -256,6 +268,27 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
           <span className="text-xs font-semibold text-slate-500 tabular-nums">
             Archiwum sesji ({filteredDocuments.length}/{documents.length})
           </span>
+          {filteredDocuments.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              {selectedBatchCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={onClearPrintSelection}
+                  className="text-[11px] font-medium text-blue-900 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Odznacz ({selectedBatchCount})
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onToggleSelectAllFiltered}
+                  className="text-[11px] font-medium text-slate-600 hover:text-blue-900 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Zaznacz wszystkie
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* School year filter */}
@@ -283,27 +316,47 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
           </select>
         </div>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Szukaj po tytule lub typie..."
-            aria-label="Szukaj dokumentów po tytule lub typie"
-            className="w-full rounded-lg border border-slate-300 bg-slate-50/70 pl-8 pr-7 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:bg-white focus:outline-none transition-colors"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer"
-              aria-label="Wyczyść wyszukiwanie"
+        {/* Search & Sort */}
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onChangeSearchQuery(e.target.value)}
+              placeholder="Szukaj kart..."
+              aria-label="Szukaj dokumentów po tytule lub typie"
+              className="w-full rounded-lg border border-slate-300 bg-slate-50/70 pl-8 pr-7 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:bg-white focus:outline-none transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => onChangeSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 cursor-pointer"
+                aria-label="Wyczyść wyszukiwanie"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="shrink-0">
+            <label htmlFor="sidebar-sort-select" className="sr-only">
+              Sortuj dokumenty
+            </label>
+            <select
+              id="sidebar-sort-select"
+              value={sortBy}
+              onChange={(e) => onChangeSortBy(e.target.value as DocumentSortOption)}
+              aria-label="Sortuj dokumenty"
+              title="Sortuj dokumenty według daty utworzenia lub tytułu"
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 focus:border-blue-900 focus:outline-none cursor-pointer"
             >
-              <X className="w-3 h-3" />
-            </button>
-          )}
+              <option value="newest">Najnowsze</option>
+              <option value="oldest">Najstarsze</option>
+              <option value="title_asc">Tytuł A–Z</option>
+            </select>
+          </div>
         </div>
 
         {documents.length === 0 ? (
@@ -316,7 +369,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             <button
               type="button"
               onClick={() => {
-                setSearchQuery('');
+                onChangeSearchQuery('');
                 onChangeYearFilter('all');
               }}
               className="text-blue-900 font-semibold hover:underline cursor-pointer"
@@ -345,12 +398,12 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
         )}
       </div>
 
-      {/* Print scope selector */}
-      <div className="border-t border-slate-200 bg-slate-50 p-3.5 space-y-2">
+      {/* Print scope & one-click batch print */}
+      <div className="border-t border-slate-200 bg-slate-50 p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-700">
           <div className="flex items-center gap-1.5">
             <Printer className="w-3.5 h-3.5 text-blue-900" />
-            <span>Zakres wydruku / PDF</span>
+            <span>Drukowanie / PDF</span>
           </div>
           {yearFilter !== 'all' && (
             <span className="text-[11px] font-normal text-slate-500 font-mono-tabular">
@@ -358,6 +411,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             </span>
           )}
         </div>
+
         <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-200/70 p-1">
           <button
             type="button"
@@ -379,9 +433,30 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Komplet ({printBatchCount})
+            Podgląd ({batchDocumentsCount})
           </button>
         </div>
+
+        <button
+          type="button"
+          disabled={batchDocumentsCount === 0}
+          onClick={onPrintBatch}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
+          title={
+            selectedBatchCount > 0
+              ? `Uruchom drukowanie ${selectedBatchCount} zaznaczonych dokumentów jako jeden komplet`
+              : `Uruchom drukowanie wszystkich przefiltrowanych dokumentów (${batchDocumentsCount}) jako jeden komplet`
+          }
+        >
+          <Printer className="w-3.5 h-3.5 shrink-0" />
+          <span className="tabular-nums truncate">
+            {selectedBatchCount > 0
+              ? `Drukuj zaznaczone (${selectedBatchCount})`
+              : yearFilter !== 'all' && yearFilter !== 'Bez roku'
+                ? `Drukuj komplet ${yearFilter} (${batchDocumentsCount})`
+                : `Drukuj komplet (${batchDocumentsCount})`}
+          </span>
+        </button>
       </div>
     </aside>
   );

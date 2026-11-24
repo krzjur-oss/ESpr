@@ -4,27 +4,51 @@ import {
   AdditionalTaskRow,
   KartaInformacyjnaDoc,
   SubjectHoursRow,
+  TeacherProfile,
 } from '../../types/reports';
 import { createId } from '../../utils/documentFactory';
 import {
   Field,
   FormTopBar,
   SectionHeader,
+  TemplateTextareaField,
   inputClass,
-  textareaClass,
 } from './FormPrimitives';
+import {
+  ProfileComboInput,
+  ProfileComboOption,
+  getProfileClassOptions,
+  getProfileDateOptions,
+  getProfileSchoolOptions,
+  getProfileSubjectOptions,
+  getProfileTeacherOptions,
+} from './ProfileComboInput';
 
 interface Props {
   doc: KartaInformacyjnaDoc;
+  profile: TeacherProfile;
   onChange: (updated: KartaInformacyjnaDoc) => void;
   onRequestReset: () => void;
 }
 
 export const KartaInformacyjnaForm: React.FC<Props> = ({
   doc,
+  profile,
   onChange,
   onRequestReset,
 }) => {
+  const periodOptions: ProfileComboOption[] = [
+    ...(profile.periodText.trim()
+      ? [{ value: profile.periodText.trim(), subtitle: 'Domyślny okres z Profilu' }]
+      : []),
+    { value: '01.09.2025 – 31.01.2026', subtitle: 'I semestr' },
+    { value: '01.02.2026 – 26.06.2026', subtitle: 'II semestr' },
+  ];
+
+  const homeroomOptions = getProfileClassOptions(profile, [
+    { value: 'brak', subtitle: 'Brak wychowawstwa' },
+  ]);
+
   const update = (patch: Partial<KartaInformacyjnaDoc>) => {
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
     if ('period' in patch) {
@@ -86,31 +110,32 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
         />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Imię i nazwisko nauczyciela">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.teacherName}
-              onChange={(e) => update({ teacherName: e.target.value })}
+              onChange={(val) => update({ teacherName: val })}
+              options={getProfileTeacherOptions(profile)}
               placeholder="Imię i nazwisko"
-              className={inputClass}
+              dropdownHeader="Nauczyciel z Profilu"
             />
           </Field>
           <Field label="Nazwa szkoły / placówki">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.schoolName}
-              onChange={(e) => update({ schoolName: e.target.value })}
+              onChange={(val) => update({ schoolName: val })}
+              options={getProfileSchoolOptions(profile)}
               placeholder="Nazwa szkoły"
-              className={inputClass}
+              dropdownHeader="Szkoła zapisana w Profilu"
             />
           </Field>
           <Field label="Okres rozliczeniowy">
             <div className="space-y-2">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.period}
-                onChange={(e) => update({ period: e.target.value })}
+                onChange={(val) => update({ period: val })}
+                options={periodOptions}
                 placeholder="np. 01.09.2025 – 31.01.2026"
                 className={`${inputClass} font-mono-tabular`}
+                dropdownHeader="Okres z Profilu i semestry"
               />
               <div className="flex flex-wrap gap-2">
                 <button
@@ -141,12 +166,12 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
               />
             </Field>
             <Field label="Wychowawstwo (klasa / brak)">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.homeroomClass}
-                onChange={(e) => update({ homeroomClass: e.target.value })}
+                onChange={(val) => update({ homeroomClass: val })}
+                options={homeroomOptions}
                 placeholder="np. 5B lub brak"
-                className={inputClass}
+                dropdownHeader="Klasy i wychowawstwo z Profilu"
               />
             </Field>
           </div>
@@ -169,13 +194,15 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
           <div className="space-y-2">
             {doc.subjectHours.map((row) => (
               <div key={row.id} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={row.subject}
-                  onChange={(e) => updateSubjectHour(row.id, { subject: e.target.value })}
-                  placeholder="Nazwa przedmiotu lub zajęć"
-                  className={`${inputClass} flex-1`}
-                />
+                <div className="flex-1 min-w-0">
+                  <ProfileComboInput
+                    value={row.subject}
+                    onChange={(val) => updateSubjectHour(row.id, { subject: val })}
+                    options={getProfileSubjectOptions(profile)}
+                    placeholder="Nazwa przedmiotu lub zajęć"
+                    dropdownHeader="Przedmioty zapisane w Profilu"
+                  />
+                </div>
                 <input
                   type="text"
                   value={row.hours}
@@ -203,33 +230,30 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
       <section>
         <SectionHeader index="02" title="Podnoszenie własnych kwalifikacji" />
         <div className="space-y-4">
-          <Field label="Studia i kursy kwalifikacyjne">
-            <textarea
-              rows={2}
-              value={doc.qualificationsStudies}
-              onChange={(e) => update({ qualificationsStudies: e.target.value })}
-              placeholder="Nazwa kierunku, uczelni/ośrodka, termin ukończenia lub w trakcie..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Kursy doskonalące, warsztaty i szkoleniowe Rady Pedagogiczne">
-            <textarea
-              rows={3}
-              value={doc.qualificationsWorkshops}
-              onChange={(e) => update({ qualificationsWorkshops: e.target.value })}
-              placeholder="Tematyka szkoleń, webinarów, warsztatów oraz daty odbycia..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Udział w zebraniach metodycznych i zespołach przedmiotowych">
-            <textarea
-              rows={2}
-              value={doc.qualificationsMethodical}
-              onChange={(e) => update({ qualificationsMethodical: e.target.value })}
-              placeholder="Spotkania sieci współpracy, zespołów przedmiotowych lub wychowawczych..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Studia i kursy kwalifikacyjne"
+            category="kwalifikacje_dzialalnosc"
+            rows={2}
+            value={doc.qualificationsStudies}
+            onChange={(val) => update({ qualificationsStudies: val })}
+            placeholder="Nazwa kierunku, uczelni/ośrodka, termin ukończenia lub w trakcie..."
+          />
+          <TemplateTextareaField
+            label="Kursy doskonalące, warsztaty i szkoleniowe Rady Pedagogiczne"
+            category="kwalifikacje_dzialalnosc"
+            rows={3}
+            value={doc.qualificationsWorkshops}
+            onChange={(val) => update({ qualificationsWorkshops: val })}
+            placeholder="Tematyka szkoleń, webinarów, warsztatów oraz daty odbycia..."
+          />
+          <TemplateTextareaField
+            label="Udział w zebraniach metodycznych i zespołach przedmiotowych"
+            category="kwalifikacje_dzialalnosc"
+            rows={2}
+            value={doc.qualificationsMethodical}
+            onChange={(val) => update({ qualificationsMethodical: val })}
+            placeholder="Spotkania sieci współpracy, zespołów przedmiotowych lub wychowawczych..."
+          />
         </div>
       </section>
 
@@ -237,42 +261,38 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
       <section>
         <SectionHeader index="03" title="Działalność dydaktyczna, wychowawcza i organizacyjna" />
         <div className="space-y-4">
-          <Field label="Osiągnięcia uczniów (olimpiady, konkursy, zawody)">
-            <textarea
-              rows={3}
-              value={doc.studentAchievements}
-              onChange={(e) => update({ studentAchievements: e.target.value })}
-              placeholder="Przygotowanie uczniów, uzyskane tytuły laureatów, finalistów, wyróżnienia..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Organizacja wycieczek szkolnych i wyjazdów (w tym funkcja kierownika)">
-            <textarea
-              rows={2}
-              value={doc.tripsOrganization}
-              onChange={(e) => update({ tripsOrganization: e.target.value })}
-              placeholder="Miejsce, termin, pełniona rola (kierownik wycieczki / opiekun)..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Wzbogacenie bazy dydaktycznej i materiałowej szkoły">
-            <textarea
-              rows={2}
-              value={doc.didacticBaseEnrichment}
-              onChange={(e) => update({ didacticBaseEnrichment: e.target.value })}
-              placeholder="Opracowane pomoce dydaktyczne, gazetki, doposażenie pracowni, pozyskane środki..."
-              className={textareaClass}
-            />
-          </Field>
-          <Field label="Zajęcia statutowe (koła zainteresowań, konsultacje, zajęcia wyrównawcze)">
-            <textarea
-              rows={2}
-              value={doc.statutoryActivities}
-              onChange={(e) => update({ statutoryActivities: e.target.value })}
-              placeholder="Rodzaj prowadzonych zajęć statutowych, częstotliwość i liczba uczestników..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Osiągnięcia uczniów (olimpiady, konkursy, zawody)"
+            category="sciezka_konkursy_wyjazdy"
+            rows={3}
+            value={doc.studentAchievements}
+            onChange={(val) => update({ studentAchievements: val })}
+            placeholder="Przygotowanie uczniów, uzyskane tytuły laureatów, finalistów, wyróżnienia..."
+          />
+          <TemplateTextareaField
+            label="Organizacja wycieczek szkolnych i wyjazdów (w tym funkcja kierownika)"
+            category="sciezka_konkursy_wyjazdy"
+            rows={2}
+            value={doc.tripsOrganization}
+            onChange={(val) => update({ tripsOrganization: val })}
+            placeholder="Miejsce, termin, pełniona rola (kierownik wycieczki / opiekun)..."
+          />
+          <TemplateTextareaField
+            label="Wzbogacenie bazy dydaktycznej i materiałowej szkoły"
+            category="kwalifikacje_dzialalnosc"
+            rows={2}
+            value={doc.didacticBaseEnrichment}
+            onChange={(val) => update({ didacticBaseEnrichment: val })}
+            placeholder="Opracowane pomoce dydaktyczne, gazetki, doposażenie pracowni, pozyskane środki..."
+          />
+          <TemplateTextareaField
+            label="Zajęcia statutowe (koła zainteresowań, konsultacje, zajęcia wyrównawcze)"
+            category="kwalifikacje_dzialalnosc"
+            rows={2}
+            value={doc.statutoryActivities}
+            onChange={(val) => update({ statutoryActivities: val })}
+            placeholder="Rodzaj prowadzonych zajęć statutowych, częstotliwość i liczba uczestników..."
+          />
         </div>
       </section>
 
@@ -324,26 +344,24 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
                 />
               </Field>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Field label="Uzyskane wyniki">
-                  <textarea
-                    rows={2}
-                    value={t.results}
-                    onChange={(e) =>
-                      updateTask('directorTasks', t.id, { results: e.target.value })
-                    }
-                    className={textareaClass}
-                  />
-                </Field>
-                <Field label="Wnioski">
-                  <textarea
-                    rows={2}
-                    value={t.conclusions}
-                    onChange={(e) =>
-                      updateTask('directorTasks', t.id, { conclusions: e.target.value })
-                    }
-                    className={textareaClass}
-                  />
-                </Field>
+                <TemplateTextareaField
+                  label="Uzyskane wyniki"
+                  category="realizacja_zadan_efekty"
+                  rows={2}
+                  value={t.results}
+                  onChange={(val) =>
+                    updateTask('directorTasks', t.id, { results: val })
+                  }
+                />
+                <TemplateTextareaField
+                  label="Wnioski"
+                  category="wnioski_ewaluacja"
+                  rows={2}
+                  value={t.conclusions}
+                  onChange={(val) =>
+                    updateTask('directorTasks', t.id, { conclusions: val })
+                  }
+                />
               </div>
             </div>
           ))}
@@ -398,26 +416,24 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
                 />
               </Field>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Field label="Uzyskane wyniki">
-                  <textarea
-                    rows={2}
-                    value={t.results}
-                    onChange={(e) =>
-                      updateTask('teacherInitiativeTasks', t.id, { results: e.target.value })
-                    }
-                    className={textareaClass}
-                  />
-                </Field>
-                <Field label="Wnioski">
-                  <textarea
-                    rows={2}
-                    value={t.conclusions}
-                    onChange={(e) =>
-                      updateTask('teacherInitiativeTasks', t.id, { conclusions: e.target.value })
-                    }
-                    className={textareaClass}
-                  />
-                </Field>
+                <TemplateTextareaField
+                  label="Uzyskane wyniki"
+                  category="realizacja_zadan_efekty"
+                  rows={2}
+                  value={t.results}
+                  onChange={(val) =>
+                    updateTask('teacherInitiativeTasks', t.id, { results: val })
+                  }
+                />
+                <TemplateTextareaField
+                  label="Wnioski"
+                  category="wnioski_ewaluacja"
+                  rows={2}
+                  value={t.conclusions}
+                  onChange={(val) =>
+                    updateTask('teacherInitiativeTasks', t.id, { conclusions: val })
+                  }
+                />
               </div>
             </div>
           ))}
@@ -425,11 +441,12 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
 
         <div className="mt-6 max-w-xs">
           <Field label="Data sporządzenia karty">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.signatureDate}
-              onChange={(e) => update({ signatureDate: e.target.value })}
+              onChange={(val) => update({ signatureDate: val })}
+              options={getProfileDateOptions(profile)}
               className={`${inputClass} font-mono-tabular`}
+              dropdownHeader="Data z Profilu lub bieżąca"
             />
           </Field>
         </div>

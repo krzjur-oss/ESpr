@@ -13,7 +13,7 @@ interface TopBarProps {
 const NAV_ITEMS: { id: MainTab; label: string }[] = [
   { id: 'kreator', label: 'Kreator' },
   { id: 'profil', label: 'Profil' },
-  { id: 'baza_wnioskow', label: 'Baza wniosków' },
+  { id: 'baza_wnioskow', label: 'Wnioski i szablony' },
   { id: 'kopia_json', label: 'Kopia JSON' },
   { id: 'o_programie', label: 'O programie' },
 ];

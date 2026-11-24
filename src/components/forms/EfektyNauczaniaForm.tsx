@@ -12,13 +12,25 @@ import {
   Field,
   FormTopBar,
   SectionHeader,
+  TemplateTextareaField,
   inputClass,
-  textareaClass,
 } from './FormPrimitives';
+import {
+  ProfileComboInput,
+  getProfileClassOptions,
+  getProfileDateOptions,
+  getProfileProgramOptions,
+  getProfileSchoolOptions,
+  getProfileSubjectOptions,
+  getProfileTeacherOptions,
+  getProfileTextbookOptions,
+  getProfileYearOptions,
+} from './ProfileComboInput';
 
 interface Props {
   doc: EfektyNauczaniaDoc;
   profile: TeacherProfile;
+  availableYears?: string[];
   onChange: (updated: EfektyNauczaniaDoc) => void;
   onOpenConclusionsPicker: () => void;
   onRequestReset: () => void;
@@ -27,6 +39,7 @@ interface Props {
 export const EfektyNauczaniaForm: React.FC<Props> = ({
   doc,
   profile,
+  availableYears = [],
   onChange,
   onOpenConclusionsPicker,
   onRequestReset,
@@ -85,22 +98,23 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
         />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Nazwa szkoły / placówki">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.schoolName}
-              onChange={(e) => update({ schoolName: e.target.value })}
+              onChange={(val) => update({ schoolName: val })}
+              options={getProfileSchoolOptions(profile)}
               placeholder="np. Szkoła Podstawowa nr 1 im. ..."
-              className={inputClass}
+              dropdownHeader="Szkoła zapisana w Profilu"
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Rok szkolny">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.schoolYear}
-                onChange={(e) => update({ schoolYear: e.target.value })}
+                onChange={(val) => update({ schoolYear: val })}
+                options={getProfileYearOptions(profile, availableYears)}
                 placeholder="2025/2026"
                 className={`${inputClass} font-mono-tabular`}
+                dropdownHeader="Lata szkolne z Profilu i archiwum"
               />
             </Field>
             <Field label="Semestr">
@@ -124,65 +138,53 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
           </div>
 
           <Field label="Przedmiot / rodzaj zajęć">
-            <input
-              type="text"
-              list="profile-subjects-datalist"
+            <ProfileComboInput
               value={doc.subject}
-              onChange={(e) => update({ subject: e.target.value })}
+              onChange={(val) => update({ subject: val })}
+              options={getProfileSubjectOptions(profile)}
               placeholder="np. Matematyka, Język polski, Edukacja wczesnoszkolna"
-              className={inputClass}
+              dropdownHeader="Przedmioty i programy z Profilu"
             />
-            <datalist id="profile-subjects-datalist">
-              {profile.subjectsList.map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
           </Field>
 
           <Field label="Klasa / oddział">
-            <input
-              type="text"
-              list="profile-classes-datalist"
+            <ProfileComboInput
               value={doc.className}
-              onChange={(e) => update({ className: e.target.value })}
+              onChange={(val) => update({ className: val })}
+              options={getProfileClassOptions(profile)}
               placeholder="np. 4A, 1B, 7C"
-              className={inputClass}
+              dropdownHeader="Klasy zapisane w Profilu"
             />
-            <datalist id="profile-classes-datalist">
-              {profile.classesList.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
           </Field>
 
           <Field label="Imię i nazwisko nauczyciela">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.teacherName}
-              onChange={(e) => update({ teacherName: e.target.value })}
+              onChange={(val) => update({ teacherName: val })}
+              options={getProfileTeacherOptions(profile)}
               placeholder="Imię i nazwisko"
-              className={inputClass}
+              dropdownHeader="Nauczyciel z Profilu"
             />
           </Field>
 
           <Field label="Numer programu nauczania">
-            <input
-              type="text"
+            <ProfileComboInput
               value={doc.programNumber}
-              onChange={(e) => update({ programNumber: e.target.value })}
+              onChange={(val) => update({ programNumber: val })}
+              options={getProfileProgramOptions(profile)}
               placeholder="np. DKOS-5002-12/18 lub nazwa programu"
-              className={inputClass}
+              dropdownHeader="Programy zapisane w Profilu"
             />
           </Field>
 
           <div className="md:col-span-2 space-y-2">
             <Field label="Tytuł i autor podręcznika">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.textbookTitle}
-                onChange={(e) => update({ textbookTitle: e.target.value })}
+                onChange={(val) => update({ textbookTitle: val })}
+                options={getProfileTextbookOptions(profile)}
                 placeholder="np. Matematyka z plusem 4, GWO (praca zbiorowa)"
-                className={inputClass}
+                dropdownHeader="Podręczniki zapisane w Profilu"
               />
             </Field>
             {canApplyFromProfile && matchedAssignment && (
@@ -245,32 +247,28 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
           </Field>
 
           {doc.curriculumStatus !== 'na_biezaco' && (
-            <Field
+            <TemplateTextareaField
               label={
                 doc.curriculumStatus === 'opoznienie'
                   ? 'Zakres opóźnienia i planowane działania wyrównawcze'
                   : 'Zakres wyprzedzenia założonego planu'
               }
-            >
-              <textarea
-                rows={2}
-                value={doc.curriculumScope}
-                onChange={(e) => update({ curriculumScope: e.target.value })}
-                placeholder="Podaj konkretne działy / tematy oraz sposób nadrobienia lub wykorzystania czasu..."
-                className={textareaClass}
-              />
-            </Field>
+              category="podstawa_programowa"
+              rows={2}
+              value={doc.curriculumScope}
+              onChange={(val) => update({ curriculumScope: val })}
+              placeholder="Podaj konkretne działy / tematy oraz sposób nadrobienia lub wykorzystania czasu..."
+            />
           )}
 
-          <Field label="Uwagi dotyczące realizacji podstawy programowej">
-            <textarea
-              rows={2}
-              value={doc.curriculumNotes}
-              onChange={(e) => update({ curriculumNotes: e.target.value })}
-              placeholder="Opcjonalne uwagi (np. dostosowanie do potrzeb klasy, absencje, dni wolne)..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Uwagi dotyczące realizacji podstawy programowej"
+            category="podstawa_programowa"
+            rows={2}
+            value={doc.curriculumNotes}
+            onChange={(val) => update({ curriculumNotes: val })}
+            placeholder="Opcjonalne uwagi (np. dostosowanie do potrzeb klasy, absencje, dni wolne)..."
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
             <Field label="Liczba ocen niedostatecznych">
@@ -293,15 +291,14 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
             </Field>
           </div>
 
-          <Field label="Uwagi do ocen i wyników nauczania">
-            <textarea
-              rows={2}
-              value={doc.gradesNotes}
-              onChange={(e) => update({ gradesNotes: e.target.value })}
-              placeholder="Np. przyczyny ocen niedostatecznych, poziom przygotowania klasy, wysoka frekwencja..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Uwagi do ocen i wyników nauczania"
+            category="oceny_wyniki"
+            rows={2}
+            value={doc.gradesNotes}
+            onChange={(val) => update({ gradesNotes: val })}
+            placeholder="Np. przyczyny ocen niedostatecznych, poziom przygotowania klasy, wysoka frekwencja..."
+          />
         </div>
       </section>
 
@@ -330,12 +327,13 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
               </label>
             </div>
             {!doc.individualPathNotApplicable && (
-              <textarea
+              <TemplateTextareaField
+                label="Opis efektów zindywidualizowanej ścieżki"
+                category="sciezka_konkursy_wyjazdy"
                 rows={3}
                 value={doc.individualPathSummary}
-                onChange={(e) => update({ individualPathSummary: e.target.value })}
+                onChange={(val) => update({ individualPathSummary: val })}
                 placeholder="Opisz efekty pracy z uczniem objętym zindywidualizowaną ścieżką kształcenia..."
-                className={textareaClass}
               />
             )}
           </div>
@@ -356,35 +354,34 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
               </label>
             </div>
             {!doc.competitionsNone && (
-              <textarea
+              <TemplateTextareaField
+                label="Szczegóły konkursów i osiągnięć"
+                category="sciezka_konkursy_wyjazdy"
                 rows={3}
                 value={doc.competitionsDetails}
-                onChange={(e) => update({ competitionsDetails: e.target.value })}
+                onChange={(val) => update({ competitionsDetails: val })}
                 placeholder="Podaj nazwę konkursu/zawodów, liczbę biorących udział uczniów oraz uzyskane miejsca/wyróżnienia..."
-                className={textareaClass}
               />
             )}
           </div>
 
-          <Field label="Wyjazdy edukacyjne w ramach realizacji podstawy programowej">
-            <textarea
-              rows={2}
-              value={doc.educationalTrips}
-              onChange={(e) => update({ educationalTrips: e.target.value })}
-              placeholder="Np. wycieczka do muzeum, warsztaty w centrum nauki, wyjście do teatru (lub wpisz 'Brak')..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Wyjazdy edukacyjne w ramach realizacji podstawy programowej"
+            category="sciezka_konkursy_wyjazdy"
+            rows={2}
+            value={doc.educationalTrips}
+            onChange={(val) => update({ educationalTrips: val })}
+            placeholder="Np. wycieczka do muzeum, warsztaty w centrum nauki, wyjście do teatru (lub wpisz 'Brak')..."
+          />
 
-          <Field label="Realizacja programu wychowawczo-profilaktycznego">
-            <textarea
-              rows={3}
-              value={doc.preventiveProgram}
-              onChange={(e) => update({ preventiveProgram: e.target.value })}
-              placeholder="Wpisz treści wychowawczo-profilaktyczne, pogadanki, warsztaty, spotkania, wyjścia, przedstawienia zrealizowane na zajęciach..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Realizacja programu wychowawczo-profilaktycznego"
+            category="program_profilaktyczny"
+            rows={3}
+            value={doc.preventiveProgram}
+            onChange={(val) => update({ preventiveProgram: val })}
+            placeholder="Wpisz treści wychowawczo-profilaktyczne, pogadanki, warsztaty, spotkania, wyjścia, przedstawienia zrealizowane na zajęciach..."
+          />
         </div>
       </section>
 
@@ -396,15 +393,14 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
           subtitle="Ewaluacja wniosków z ubiegłego roku oraz kierunki pracy na kolejny okres"
         />
         <div className="space-y-4">
-          <Field label="Stopień realizacji wniosków z poprzedniego roku szkolnego">
-            <textarea
-              rows={3}
-              value={doc.previousConclusionsStatus}
-              onChange={(e) => update({ previousConclusionsStatus: e.target.value })}
-              placeholder="W jakim stopniu wdrożono wcześniejsze zalecenia i jakie przyniosły rezultaty..."
-              className={textareaClass}
-            />
-          </Field>
+          <TemplateTextareaField
+            label="Stopień realizacji wniosków z poprzedniego roku szkolnego"
+            category="wnioski_ewaluacja"
+            rows={3}
+            value={doc.previousConclusionsStatus}
+            onChange={(val) => update({ previousConclusionsStatus: val })}
+            placeholder="W jakim stopniu wdrożono wcześniejsze zalecenia i jakie przyniosły rezultaty..."
+          />
 
           <ConclusionsField
             label="Wnioski do dalszej pracy"
@@ -417,12 +413,13 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
 
           <div className="max-w-xs">
             <Field label="Data sporządzenia dokumentu">
-              <input
-                type="text"
+              <ProfileComboInput
                 value={doc.signatureDate}
-                onChange={(e) => update({ signatureDate: e.target.value })}
+                onChange={(val) => update({ signatureDate: val })}
+                options={getProfileDateOptions(profile)}
                 placeholder="DD.MM.RRRR"
                 className={`${inputClass} font-mono-tabular`}
+                dropdownHeader="Data z Profilu lub bieżąca"
               />
             </Field>
           </div>

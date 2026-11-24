@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Share2, Trash2, Upload } from 'lucide-react';
 import { AppState } from '../types/reports';
 import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storage';
 
@@ -7,12 +7,14 @@ interface BackupJsonViewProps {
   state: AppState;
   onImportState: (nextState: AppState) => void;
   onRequestFullReset: () => void;
+  onOpenShareModal: (mode: 'export' | 'import') => void;
 }
 
 export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
   state,
   onImportState,
   onRequestFullReset,
+  onOpenShareModal,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -104,6 +106,10 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                 Własne wnioski w bazie:{' '}
                 <strong className="font-mono-tabular text-slate-900">{state.customWnioski.length}</strong>
               </p>
+              <p>
+                Szablony własne fragmentów:{' '}
+                <strong className="font-mono-tabular text-slate-900">{state.customTemplates.length}</strong>
+              </p>
             </div>
           </div>
 
@@ -147,6 +153,39 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
           </div>
         </section>
       </div>
+
+      {/* Share / Transfer only Wnioski & Szablony */}
+      <section className="mt-8 rounded-xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Share2 className="w-4 h-4 text-blue-900 shrink-0" />
+            <h2 className="text-base font-semibold text-slate-900">
+              Udostępnianie samych wniosków i szablonów (JSON)
+            </h2>
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Eksportuj lub importuj wyłącznie własne wnioski ({state.customWnioski.length}) i szablony własne ({state.customTemplates.length}) — bez dokumentów, klas ani profilu. Idealne do wymiany z innymi nauczycielami.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onOpenShareModal('export')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-900" />
+            <span>Eksportuj wnioski / szablony</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenShareModal('import')}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Importuj wnioski / szablony</span>
+          </button>
+        </div>
+      </section>
 
       {/* Danger Zone: Full Reset */}
       <section className="mt-8 rounded-xl border border-red-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

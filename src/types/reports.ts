@@ -177,12 +177,42 @@ export interface CustomWniosekEntry {
   createdAt: string;
 }
 
+export type TemplateSectionCategory =
+  | 'ogolne'
+  | 'podstawa_programowa'
+  | 'oceny_wyniki'
+  | 'sciezka_konkursy_wyjazdy'
+  | 'program_profilaktyczny'
+  | 'realizacja_zadan_efekty'
+  | 'kwalifikacje_dzialalnosc'
+  | 'wnioski_ewaluacja';
+
+export interface CustomTemplateEntry {
+  id: string;
+  title: string;
+  category: TemplateSectionCategory;
+  content: string;
+  createdAt: string;
+}
+
+export const TEMPLATE_CATEGORY_LABELS: Record<TemplateSectionCategory, string> = {
+  ogolne: 'Uniwersalne / inne fragmenty',
+  podstawa_programowa: 'Podstawa programowa i uwagi',
+  oceny_wyniki: 'Oceny, wyniki i obszary (mocne/słabsze)',
+  sciezka_konkursy_wyjazdy: 'Ścieżka indyw., konkursy i wyjazdy',
+  program_profilaktyczny: 'Program wychowawczo-profilaktyczny',
+  realizacja_zadan_efekty: 'Realizacja zadań, plany i efekty',
+  kwalifikacje_dzialalnosc: 'Kwalifikacje, baza i zajęcia statutowe',
+  wnioski_ewaluacja: 'Wnioski i ewaluacja z ubiegłego roku',
+};
+
 export interface AppState {
   version: number;
   profile: TeacherProfile;
   documents: ReportDocument[];
   activeDocumentId: string | null;
   customWnioski: CustomWniosekEntry[];
+  customTemplates: CustomTemplateEntry[];
 }
 
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {

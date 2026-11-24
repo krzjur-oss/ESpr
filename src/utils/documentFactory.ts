@@ -489,5 +489,6 @@ export function createInitialAppState(): AppState {
     documents: [starterDoc],
     activeDocumentId: starterDoc.id,
     customWnioski: [],
+    customTemplates: [],
   };
 }

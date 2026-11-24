@@ -1,17 +1,74 @@
-import { AppState, CustomWniosekEntry, SubjectAssignment, TeacherProfile } from '../types/reports';
+import {
+  CUSTOM_WNIOSKI_CATEGORY_ID,
+  WNIOSKI_CATEGORY_OPTIONS,
+} from '../data/wnioskiDatabase';
+import {
+  AppState,
+  CustomTemplateEntry,
+  CustomWniosekEntry,
+  SubjectAssignment,
+  TEMPLATE_CATEGORY_LABELS,
+  TeacherProfile,
+  TemplateSectionCategory,
+} from '../types/reports';
 import { createDefaultProfile, createId, createInitialAppState } from './documentFactory';
+
+const VALID_WNIOSEK_CATEGORY_IDS = new Set<string>(
+  WNIOSKI_CATEGORY_OPTIONS.map((opt) => opt.id)
+);
 
 function sanitizeCustomWnioski(raw: unknown): CustomWniosekEntry[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (item): item is CustomWniosekEntry =>
-      !!item &&
-      typeof item === 'object' &&
-      typeof (item as CustomWniosekEntry).id === 'string' &&
-      typeof (item as CustomWniosekEntry).categoryId === 'string' &&
-      typeof (item as CustomWniosekEntry).text === 'string' &&
-      (item as CustomWniosekEntry).text.trim().length > 0
-  );
+  return raw
+    .filter(
+      (item): item is Partial<CustomWniosekEntry> & { text: string } =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as CustomWniosekEntry).text === 'string' &&
+        (item as CustomWniosekEntry).text.trim().length > 0
+    )
+    .map((item) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
+      categoryId:
+        typeof item.categoryId === 'string' && VALID_WNIOSEK_CATEGORY_IDS.has(item.categoryId)
+          ? item.categoryId
+          : CUSTOM_WNIOSKI_CATEGORY_ID,
+      text: item.text.trim(),
+      createdAt:
+        typeof item.createdAt === 'string' && item.createdAt.trim()
+          ? item.createdAt
+          : new Date().toISOString(),
+    }));
+}
+
+const VALID_TEMPLATE_CATEGORIES = new Set<string>(Object.keys(TEMPLATE_CATEGORY_LABELS));
+
+function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (item): item is Partial<CustomTemplateEntry> & { content: string } =>
+        !!item &&
+        typeof item === 'object' &&
+        typeof (item as CustomTemplateEntry).content === 'string' &&
+        (item as CustomTemplateEntry).content.trim().length > 0
+    )
+    .map((item) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
+      title:
+        typeof item.title === 'string' && item.title.trim()
+          ? item.title.trim()
+          : 'Szablon własny',
+      category:
+        typeof item.category === 'string' && VALID_TEMPLATE_CATEGORIES.has(item.category)
+          ? (item.category as TemplateSectionCategory)
+          : 'ogolne',
+      content: item.content.trim(),
+      createdAt:
+        typeof item.createdAt === 'string' && item.createdAt.trim()
+          ? item.createdAt
+          : new Date().toISOString(),
+    }));
 }
 
 function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
@@ -70,10 +127,11 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
 
 const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
 const DB_NAME = 'esprawozdania_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_META = 'meta';
 const STORE_DOCUMENTS = 'documents';
 const STORE_WNIOSKI = 'customWnioski';
+const STORE_TEMPLATES = 'customTemplates';
 
 export type StorageBackend = 'indexeddb' | 'memory';
 
@@ -152,6 +210,9 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_WNIOSKI)) {
         db.createObjectStore(STORE_WNIOSKI, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
+        db.createObjectStore(STORE_TEMPLATES, { keyPath: 'id' });
+      }
     };
 
     request.onsuccess = () => {
@@ -200,6 +261,7 @@ function readLegacyLocalStorage(): AppState | null {
       documents: parsed.documents,
       activeDocumentId: activeId,
       customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
+      customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
     };
   } catch {
     return null;
@@ -228,10 +290,14 @@ async function writeStateToDb(
     const db = await openDatabase();
     const prev = replaceAll ? null : lastPersistedState;
 
-    const tx = db.transaction([STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI], 'readwrite');
+    const tx = db.transaction(
+      [STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI, STORE_TEMPLATES],
+      'readwrite'
+    );
     const metaStore = tx.objectStore(STORE_META);
     const docStore = tx.objectStore(STORE_DOCUMENTS);
     const wnioskiStore = tx.objectStore(STORE_WNIOSKI);
+    const templatesStore = tx.objectStore(STORE_TEMPLATES);
 
     // 1. Update metadata keys only when needed
     if (!prev) {
@@ -241,6 +307,7 @@ async function writeStateToDb(
       metaStore.put({ key: 'activeDocumentId', value: state.activeDocumentId });
       metaStore.put({ key: 'documentOrder', value: state.documents.map((d) => d.id) });
       metaStore.put({ key: 'customWnioskiOrder', value: state.customWnioski.map((w) => w.id) });
+      metaStore.put({ key: 'customTemplatesOrder', value: state.customTemplates.map((t) => t.id) });
     } else {
       if (prev.version !== state.version) {
         metaStore.put({ key: 'version', value: state.version });
@@ -260,6 +327,11 @@ async function writeStateToDb(
       const nextWnioskiOrder = state.customWnioski.map((w) => w.id);
       if (!arraysEqual(prevWnioskiOrder, nextWnioskiOrder)) {
         metaStore.put({ key: 'customWnioskiOrder', value: nextWnioskiOrder });
+      }
+      const prevTemplatesOrder = prev.customTemplates.map((t) => t.id);
+      const nextTemplatesOrder = state.customTemplates.map((t) => t.id);
+      if (!arraysEqual(prevTemplatesOrder, nextTemplatesOrder)) {
+        metaStore.put({ key: 'customTemplatesOrder', value: nextTemplatesOrder });
       }
     }
 
@@ -305,6 +377,27 @@ async function writeStateToDb(
       }
     }
 
+    // 4. Sync customTemplates store incrementally (or full replace)
+    if (!prev) {
+      templatesStore.clear();
+      for (const tpl of state.customTemplates) {
+        templatesStore.put(tpl);
+      }
+    } else if (prev.customTemplates !== state.customTemplates) {
+      const prevMap = new Map(prev.customTemplates.map((t) => [t.id, t]));
+      const nextIds = new Set(state.customTemplates.map((t) => t.id));
+      for (const oldId of prevMap.keys()) {
+        if (!nextIds.has(oldId)) {
+          templatesStore.delete(oldId);
+        }
+      }
+      for (const tpl of state.customTemplates) {
+        if (prevMap.get(tpl.id) !== tpl) {
+          templatesStore.put(tpl);
+        }
+      }
+    }
+
     await txDone(tx);
     lastPersistedState = state;
     return true;
@@ -319,11 +412,15 @@ export async function loadAppState(): Promise<{
 }> {
   try {
     const db = await openDatabase();
-    const tx = db.transaction([STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI], 'readonly');
-    const [metaRecords, rawDocs, rawWnioski] = await Promise.all([
+    const tx = db.transaction(
+      [STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI, STORE_TEMPLATES],
+      'readonly'
+    );
+    const [metaRecords, rawDocs, rawWnioski, rawTemplates] = await Promise.all([
       reqToPromise<MetaRecord[]>(tx.objectStore(STORE_META).getAll()),
       reqToPromise<AppState['documents']>(tx.objectStore(STORE_DOCUMENTS).getAll()),
       reqToPromise<CustomWniosekEntry[]>(tx.objectStore(STORE_WNIOSKI).getAll()),
+      reqToPromise<CustomTemplateEntry[]>(tx.objectStore(STORE_TEMPLATES).getAll()),
     ]);
     await txDone(tx);
 
@@ -338,6 +435,9 @@ export async function loadAppState(): Promise<{
       const orderedWnioski = sanitizeCustomWnioski(
         reorderByIds(rawWnioski, metaMap.get('customWnioskiOrder'))
       );
+      const orderedTemplates = sanitizeCustomTemplates(
+        reorderByIds(rawTemplates, metaMap.get('customTemplatesOrder'))
+      );
       const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
       const rawActiveId = metaMap.get('activeDocumentId');
       const activeDocumentId =
@@ -351,6 +451,7 @@ export async function loadAppState(): Promise<{
         documents: orderedDocs,
         activeDocumentId,
         customWnioski: orderedWnioski,
+        customTemplates: orderedTemplates,
       };
 
       lastPersistedState = hydrated;
@@ -485,9 +586,222 @@ export function validateAndParseImportedJson(jsonText: string): {
         documents: data.documents,
         activeDocumentId,
         customWnioski: sanitizeCustomWnioski(data.customWnioski),
+        customTemplates: sanitizeCustomTemplates(data.customTemplates),
       },
     };
   } catch {
     return { ok: false, error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.' };
   }
+}
+
+export type PhrasesExportScope = 'all' | 'wnioski' | 'szablony';
+
+export interface SharedPhrasesBundle {
+  app: 'E-Sprawozdania';
+  kind: 'phrases_bundle';
+  version: number;
+  exportedAt: string;
+  customWnioski: CustomWniosekEntry[];
+  customTemplates: CustomTemplateEntry[];
+}
+
+export function exportPhrasesAsJson(
+  customWnioski: CustomWniosekEntry[],
+  customTemplates: CustomTemplateEntry[],
+  scope: PhrasesExportScope = 'all'
+): void {
+  const wnioskiToExport = scope === 'szablony' ? [] : customWnioski;
+  const templatesToExport = scope === 'wnioski' ? [] : customTemplates;
+  const payload: SharedPhrasesBundle = {
+    app: 'E-Sprawozdania',
+    kind: 'phrases_bundle',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    customWnioski: wnioskiToExport,
+    customTemplates: templatesToExport,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateTag = new Date().toISOString().slice(0, 10);
+  const prefix =
+    scope === 'wnioski'
+      ? 'sprawozdania-wnioski'
+      : scope === 'szablony'
+        ? 'sprawozdania-szablony'
+        : 'sprawozdania-wnioski-i-szablony';
+  a.href = url;
+  a.download = `${prefix}-${dateTag}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function validateAndParseSharedPhrasesJson(jsonText: string):
+  | {
+      ok: true;
+      customWnioski: CustomWniosekEntry[];
+      customTemplates: CustomTemplateEntry[];
+      sourceKind: 'phrases_bundle' | 'full_backup';
+    }
+  | {
+      ok: false;
+      error: string;
+    } {
+  try {
+    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { ok: false, error: 'Plik nie zawiera prawidłowego obiektu JSON.' };
+    }
+
+    const hasWnioskiArray = Array.isArray(data.customWnioski);
+    const hasTemplatesArray = Array.isArray(data.customTemplates);
+
+    if (!hasWnioskiArray && !hasTemplatesArray) {
+      return {
+        ok: false,
+        error:
+          'Wybrany plik JSON nie zawiera list „customWnioski” ani „customTemplates”. Upewnij się, że wskazano plik wyeksportowany z programu E-Sprawozdania.',
+      };
+    }
+
+    const customWnioski = sanitizeCustomWnioski(data.customWnioski);
+    const customTemplates = sanitizeCustomTemplates(data.customTemplates);
+
+    if (customWnioski.length === 0 && customTemplates.length === 0) {
+      return {
+        ok: false,
+        error:
+          'Plik nie zawiera żadnych własnych wniosków ani szablonów do zaimportowania.',
+      };
+    }
+
+    const sourceKind =
+      data.kind === 'phrases_bundle'
+        ? 'phrases_bundle'
+        : Array.isArray(data.documents)
+          ? 'full_backup'
+          : 'phrases_bundle';
+
+    return {
+      ok: true,
+      customWnioski,
+      customTemplates,
+      sourceKind,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
+  }
+}
+
+function normalizeTextKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+export function mergeImportedWnioski(
+  existing: CustomWniosekEntry[],
+  incoming: CustomWniosekEntry[],
+  mode: 'merge' | 'replace'
+): { entries: CustomWniosekEntry[]; added: number; skippedDuplicates: number } {
+  const seenKeys = new Set<string>();
+  const usedIds = new Set<string>();
+
+  if (mode === 'replace') {
+    const entries: CustomWniosekEntry[] = [];
+    let skippedDuplicates = 0;
+    for (const item of incoming) {
+      const key = `${item.categoryId}::${normalizeTextKey(item.text)}`;
+      if (seenKeys.has(key)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+      seenKeys.add(key);
+      const id = usedIds.has(item.id) ? createId() : item.id;
+      usedIds.add(id);
+      entries.push({ ...item, id });
+    }
+    return { entries, added: entries.length, skippedDuplicates };
+  }
+
+  for (const item of existing) {
+    seenKeys.add(`${item.categoryId}::${normalizeTextKey(item.text)}`);
+    usedIds.add(item.id);
+  }
+
+  const toPrepend: CustomWniosekEntry[] = [];
+  let skippedDuplicates = 0;
+  for (const item of incoming) {
+    const key = `${item.categoryId}::${normalizeTextKey(item.text)}`;
+    if (seenKeys.has(key)) {
+      skippedDuplicates += 1;
+      continue;
+    }
+    seenKeys.add(key);
+    const id = usedIds.has(item.id) ? createId() : item.id;
+    usedIds.add(id);
+    toPrepend.push({ ...item, id });
+  }
+
+  return {
+    entries: [...toPrepend, ...existing],
+    added: toPrepend.length,
+    skippedDuplicates,
+  };
+}
+
+export function mergeImportedTemplates(
+  existing: CustomTemplateEntry[],
+  incoming: CustomTemplateEntry[],
+  mode: 'merge' | 'replace'
+): { entries: CustomTemplateEntry[]; added: number; skippedDuplicates: number } {
+  const seenKeys = new Set<string>();
+  const usedIds = new Set<string>();
+
+  if (mode === 'replace') {
+    const entries: CustomTemplateEntry[] = [];
+    let skippedDuplicates = 0;
+    for (const item of incoming) {
+      const key = `${item.category}::${normalizeTextKey(item.title)}::${normalizeTextKey(item.content)}`;
+      if (seenKeys.has(key)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+      seenKeys.add(key);
+      const id = usedIds.has(item.id) ? createId() : item.id;
+      usedIds.add(id);
+      entries.push({ ...item, id });
+    }
+    return { entries, added: entries.length, skippedDuplicates };
+  }
+
+  for (const item of existing) {
+    seenKeys.add(`${item.category}::${normalizeTextKey(item.title)}::${normalizeTextKey(item.content)}`);
+    usedIds.add(item.id);
+  }
+
+  const toPrepend: CustomTemplateEntry[] = [];
+  let skippedDuplicates = 0;
+  for (const item of incoming) {
+    const key = `${item.category}::${normalizeTextKey(item.title)}::${normalizeTextKey(item.content)}`;
+    if (seenKeys.has(key)) {
+      skippedDuplicates += 1;
+      continue;
+    }
+    seenKeys.add(key);
+    const id = usedIds.has(item.id) ? createId() : item.id;
+    usedIds.add(id);
+    toPrepend.push({ ...item, id });
+  }
+
+  return {
+    entries: [...toPrepend, ...existing],
+    added: toPrepend.length,
+    skippedDuplicates,
+  };
 }
