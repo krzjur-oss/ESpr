@@ -168,7 +168,7 @@ export type ReportDocument =
   | KartaInformacyjnaDoc
   | PodsumowanieSpecjalistyDoc;
 
-export type MainTab = 'kreator' | 'profil' | 'baza_wnioskow' | 'kopia_json';
+export type MainTab = 'kreator' | 'profil' | 'baza_wnioskow' | 'kopia_json' | 'o_programie';
 
 export interface CustomWniosekEntry {
   id: string;

@@ -8,6 +8,7 @@ import {
   Printer,
   UserCog,
 } from 'lucide-react';
+import { AboutSection, AboutView } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
@@ -59,6 +60,7 @@ export default function App() {
   const [storageBackend, setStorageBackend] = useState<StorageBackend>('indexeddb');
   const hasHydratedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<MainTab>('kreator');
+  const [aboutSection, setAboutSection] = useState<AboutSection>('info');
   const [layoutMode, setLayoutMode] = useState<EditorLayoutMode>('split');
   const [printMode, setPrintMode] = useState<'active' | 'all'>('active');
   const [yearFilter, setYearFilter] = useState<string>('all');
@@ -459,6 +461,13 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'o_programie' && (
+          <AboutView
+            activeSection={aboutSection}
+            onChangeSection={setAboutSection}
+          />
+        )}
+
         {activeTab === 'kreator' && (
           <div className="flex-1 flex flex-col lg:flex-row max-w-[1440px] w-full mx-auto bg-white border-x border-slate-200/80">
             <DocumentSidebar
@@ -697,6 +706,49 @@ export default function App() {
           </>
         )}
       </main>
+
+      <footer className="border-t border-slate-200 bg-white px-4 md:px-6 py-2.5 text-xs text-slate-500 no-print">
+        <div className="mx-auto flex max-w-[1440px] flex-col sm:flex-row items-center justify-between gap-2">
+          <p className="text-center sm:text-left">
+            © 2026 <strong className="font-medium text-slate-700">mgr Krzysztof Jureczek</strong> · E-Sprawozdania v1.0 · Bezpłatnie dla nauczycieli i edukacji (WLDE)
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                setAboutSection('info');
+                setActiveTab('o_programie');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-blue-900 hover:underline cursor-pointer"
+            >
+              O programie
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAboutSection('regulamin');
+                setActiveTab('o_programie');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-blue-900 hover:underline cursor-pointer"
+            >
+              Regulamin i Prywatność
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAboutSection('licencja');
+                setActiveTab('o_programie');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-blue-900 hover:underline cursor-pointer"
+            >
+              Licencja WLDE
+            </button>
+          </div>
+        </div>
+      </footer>
 
       {/* Dedicated isolated print containers (separated from interactive UI) */}
       <div ref={activePrintRef} className="hidden" aria-hidden="true">

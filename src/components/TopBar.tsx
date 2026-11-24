@@ -15,6 +15,7 @@ const NAV_ITEMS: { id: MainTab; label: string }[] = [
   { id: 'profil', label: 'Profil' },
   { id: 'baza_wnioskow', label: 'Baza wniosków' },
   { id: 'kopia_json', label: 'Kopia JSON' },
+  { id: 'o_programie', label: 'O programie' },
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({

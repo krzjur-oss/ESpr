@@ -27,3 +27,13 @@ Budowanie wersji produkcyjnej:
 ```bash
 npm run build
 ```
+
+## Licencja i regulamin
+
+Program jest udostępniany **bezpłatnie dla nauczycieli, specjalistów szkolnych, placówek oświatowych oraz do użytku domowego** na warunkach **Wolnej Licencji Domowo-Edukacyjnej (WLDE)**.
+
+- Szczegóły licencji: [`LICENSE.md`](./LICENSE.md)
+- Regulamin i Polityka Prywatności (RODO / IndexedDB): [`REGULAMIN.md`](./REGULAMIN.md)
+
+**Autor:** mgr Krzysztof Jureczek (`kjureczek@proton.me` · `github.com/krzjur-oss`)
+
