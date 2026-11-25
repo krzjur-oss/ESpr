@@ -44,15 +44,134 @@ export function suggestNextSchoolYear(currentYear: string): string {
   return `${nowYear}/${nowYear + 1}`;
 }
 
+const ROMAN_GRADES: Record<string, number> = {
+  i: 1,
+  ii: 2,
+  iii: 3,
+  iv: 4,
+  v: 5,
+  vi: 6,
+  vii: 7,
+  viii: 8,
+};
+
+function normalizeClassToken(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:klasy|klasa|kl\.?)\s*/i, '')
+    .replace(/\s+/g, '');
+}
+
+function extractGradeNumber(token: string): number | null {
+  const cleaned = normalizeClassToken(token);
+  if (!cleaned) return null;
+  const digitMatch = cleaned.match(/^(\d{1,2})/);
+  if (digitMatch) {
+    return Number(digitMatch[1]);
+  }
+  const romanMatch = cleaned.match(/^(viii|vii|vi|iv|v|iii|ii|i)(?=[a-z]|$)/);
+  if (romanMatch && romanMatch[1] in ROMAN_GRADES) {
+    return ROMAN_GRADES[romanMatch[1]];
+  }
+  return null;
+}
+
+function parseRangeBound(raw: string): number | null {
+  const cleaned = normalizeClassToken(raw);
+  if (/^\d{1,2}$/.test(cleaned)) {
+    return Number(cleaned);
+  }
+  if (cleaned in ROMAN_GRADES) {
+    return ROMAN_GRADES[cleaned];
+  }
+  return null;
+}
+
+export function scoreClassScopeMatch(scope: string, className: string): number {
+  const trimmedScope = scope.trim();
+  const normClass = normalizeClassToken(className);
+
+  if (!trimmedScope) {
+    return 10; // General subject-wide fallback
+  }
+  if (!normClass) {
+    return -1;
+  }
+
+  const grade = extractGradeNumber(normClass);
+  const segments = trimmedScope
+    .split(/[,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let bestScore = -1;
+
+  for (const segment of segments) {
+    const normSeg = normalizeClassToken(segment);
+    if (!normSeg) continue;
+
+    // 1. Exact class match (e.g. "4a" === "4a")
+    if (normSeg === normClass) {
+      bestScore = Math.max(bestScore, 1000);
+      continue;
+    }
+
+    // 2. Exact single grade match (e.g. "4" matches "4a" or "4")
+    const exactSingleGrade = parseRangeBound(normSeg);
+    if (exactSingleGrade !== null && grade !== null && exactSingleGrade === grade) {
+      bestScore = Math.max(bestScore, 800);
+      continue;
+    }
+
+    // 3. Range match (e.g. "1-4", "1–4", "I-III", "5-8")
+    const rangeParts = segment.split(/\s*[-–—]\s*/);
+    if (rangeParts.length === 2 && grade !== null) {
+      const start = parseRangeBound(rangeParts[0]);
+      const end = parseRangeBound(rangeParts[1]);
+      if (start !== null && end !== null) {
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        if (grade >= min && grade <= max) {
+          // Narrower range receives higher specificity
+          bestScore = Math.max(bestScore, 600 - (max - min));
+          continue;
+        }
+      }
+    }
+  }
+
+  return bestScore;
+}
+
 export function findSubjectAssignment(
   profile: TeacherProfile,
-  subject: string
+  subject: string,
+  className?: string
 ): SubjectAssignment | undefined {
   const normalized = subject.trim().toLowerCase();
   if (!normalized) return undefined;
-  return (profile.subjectAssignments ?? []).find(
+  const candidates = (profile.subjectAssignments ?? []).filter(
     (item) => item.subject.trim().toLowerCase() === normalized
   );
+  if (candidates.length === 0) return undefined;
+
+  const trimmedClass = className?.trim() ?? '';
+  if (!trimmedClass) {
+    if (candidates.length === 1) return candidates[0];
+    return candidates.find((item) => !item.classScope?.trim());
+  }
+
+  let bestItem: SubjectAssignment | undefined;
+  let bestScore = -1;
+  for (const item of candidates) {
+    const score = scoreClassScopeMatch(item.classScope ?? '', trimmedClass);
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+  return bestScore >= 0 ? bestItem : undefined;
 }
 
 export function createDefaultProfile(): TeacherProfile {
@@ -70,7 +189,9 @@ export function createDefaultProfile(): TeacherProfile {
       {
         id: createId(),
         subject: 'Matematyka',
+        classScope: '',
         programNumber: '',
+        textbookNumber: '',
         textbookTitle: '',
       },
     ],
@@ -88,8 +209,8 @@ export function createEfektyNauczaniaDoc(
     profile.subjectAssignments?.[0]?.subject ??
     profile.subjectsList[0] ??
     '';
-  const assignment = findSubjectAssignment(profile, subject);
   const className = overrides?.className ?? profile.classesList[0] ?? '';
+  const assignment = findSubjectAssignment(profile, subject, className);
   const titleParts = [subject || 'Przedmiot', className ? `kl. ${className}` : ''].filter(Boolean);
 
   return {
@@ -106,6 +227,7 @@ export function createEfektyNauczaniaDoc(
     teacherName: profile.fullName,
     subject,
     programNumber: assignment?.programNumber ?? '',
+    textbookNumber: assignment?.textbookNumber ?? '',
     textbookTitle: assignment?.textbookTitle ?? '',
     className,
     curriculumStatus: 'na_biezaco',
@@ -415,9 +537,10 @@ export function cloneDocumentsForNewSchoolYear(
 
     if (clone.type === 'efekty_nauczania') {
       clone.semester = options.targetSemester;
-      const assignment = findSubjectAssignment(profile, clone.subject);
+      const assignment = findSubjectAssignment(profile, clone.subject, clone.className);
       if (assignment) {
         if (assignment.programNumber) clone.programNumber = assignment.programNumber;
+        if (assignment.textbookNumber) clone.textbookNumber = assignment.textbookNumber;
         if (assignment.textbookTitle) clone.textbookTitle = assignment.textbookTitle;
       }
 

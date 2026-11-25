@@ -23,6 +23,7 @@ import {
   getProfileSchoolOptions,
   getProfileSubjectOptions,
   getProfileTeacherOptions,
+  getProfileTextbookNumberOptions,
   getProfileTextbookOptions,
   getProfileYearOptions,
 } from './ProfileComboInput';
@@ -44,25 +45,32 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
   onOpenConclusionsPicker,
   onRequestReset,
 }) => {
-  const matchedAssignment = findSubjectAssignment(profile, doc.subject);
+  const matchedAssignment = findSubjectAssignment(profile, doc.subject, doc.className);
+
+  const isEmptyOrProfileMatched = (
+    currentVal: string | undefined,
+    field: 'programNumber' | 'textbookNumber' | 'textbookTitle'
+  ): boolean => {
+    const trimmed = (currentVal ?? '').trim();
+    if (!trimmed) return true;
+    return profile.subjectAssignments.some((a) => (a[field] ?? '').trim() === trimmed);
+  };
 
   const update = (patch: Partial<EfektyNauczaniaDoc>) => {
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
-    if ('subject' in patch) {
-      const prevAssignment = findSubjectAssignment(profile, doc.subject);
-      const nextAssignment = findSubjectAssignment(profile, patch.subject ?? '');
+    if ('subject' in patch || 'className' in patch) {
+      const nextSubject = patch.subject ?? doc.subject;
+      const nextClass = patch.className ?? doc.className;
+      const nextAssignment = findSubjectAssignment(profile, nextSubject, nextClass);
       if (nextAssignment) {
-        const programEmptyOrAuto =
-          !doc.programNumber.trim() ||
-          (prevAssignment && doc.programNumber === prevAssignment.programNumber);
-        const textbookEmptyOrAuto =
-          !doc.textbookTitle.trim() ||
-          (prevAssignment && doc.textbookTitle === prevAssignment.textbookTitle);
-        if (programEmptyOrAuto && nextAssignment.programNumber) {
-          next.programNumber = nextAssignment.programNumber;
+        if (isEmptyOrProfileMatched(doc.programNumber, 'programNumber')) {
+          next.programNumber = nextAssignment.programNumber ?? '';
         }
-        if (textbookEmptyOrAuto && nextAssignment.textbookTitle) {
-          next.textbookTitle = nextAssignment.textbookTitle;
+        if (isEmptyOrProfileMatched(doc.textbookNumber, 'textbookNumber')) {
+          next.textbookNumber = nextAssignment.textbookNumber ?? '';
+        }
+        if (isEmptyOrProfileMatched(doc.textbookTitle, 'textbookTitle')) {
+          next.textbookTitle = nextAssignment.textbookTitle ?? '';
         }
       }
     }
@@ -78,6 +86,8 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
     !!matchedAssignment &&
     ((matchedAssignment.programNumber &&
       matchedAssignment.programNumber !== doc.programNumber) ||
+      (matchedAssignment.textbookNumber &&
+        matchedAssignment.textbookNumber !== (doc.textbookNumber ?? '')) ||
       (matchedAssignment.textbookTitle &&
         matchedAssignment.textbookTitle !== doc.textbookTitle));
 
@@ -171,46 +181,113 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
             <ProfileComboInput
               value={doc.programNumber}
               onChange={(val) => update({ programNumber: val })}
-              options={getProfileProgramOptions(profile)}
-              placeholder="np. DKOS-5002-12/18 lub nazwa programu"
+              options={getProfileProgramOptions(profile, doc.subject, doc.className)}
+              onSelectOption={(opt) => {
+                const patch: Partial<EfektyNauczaniaDoc> = { programNumber: opt.value };
+                if (
+                  opt.meta?.textbookNumber &&
+                  isEmptyOrProfileMatched(doc.textbookNumber, 'textbookNumber')
+                ) {
+                  patch.textbookNumber = opt.meta.textbookNumber;
+                }
+                if (
+                  opt.meta?.textbookTitle &&
+                  isEmptyOrProfileMatched(doc.textbookTitle, 'textbookTitle')
+                ) {
+                  patch.textbookTitle = opt.meta.textbookTitle;
+                }
+                update(patch);
+              }}
+              placeholder="np. AZ-1-01/18 lub DKOS-5002-12/18"
+              className={`${inputClass} font-mono-tabular`}
               dropdownHeader="Programy zapisane w Profilu"
             />
           </Field>
 
-          <div className="md:col-span-2 space-y-2">
-            <Field label="Tytuł i autor podręcznika">
-              <ProfileComboInput
-                value={doc.textbookTitle}
-                onChange={(val) => update({ textbookTitle: val })}
-                options={getProfileTextbookOptions(profile)}
-                placeholder="np. Matematyka z plusem 4, GWO (praca zbiorowa)"
-                dropdownHeader="Podręczniki zapisane w Profilu"
-              />
-            </Field>
-            {canApplyFromProfile && matchedAssignment && (
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-950">
-                <span>
-                  W Profilu zapisano program i podręcznik dla przedmiotu{' '}
-                  <strong>{matchedAssignment.subject}</strong>.
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    update({
-                      programNumber:
-                        matchedAssignment.programNumber || doc.programNumber,
-                      textbookTitle:
-                        matchedAssignment.textbookTitle || doc.textbookTitle,
-                    })
-                  }
-                  className="inline-flex items-center gap-1 rounded-md bg-blue-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-800 whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <BookCheck className="w-3.5 h-3.5" />
-                  <span>Wczytaj z Profilu</span>
-                </button>
-              </div>
-            )}
-          </div>
+          <Field label="Numer podręcznika / nr zatwierdzenia">
+            <ProfileComboInput
+              value={doc.textbookNumber ?? ''}
+              onChange={(val) => update({ textbookNumber: val })}
+              options={getProfileTextbookNumberOptions(profile, doc.subject, doc.className)}
+              onSelectOption={(opt) => {
+                const patch: Partial<EfektyNauczaniaDoc> = { textbookNumber: opt.value };
+                if (
+                  opt.meta?.textbookTitle &&
+                  isEmptyOrProfileMatched(doc.textbookTitle, 'textbookTitle')
+                ) {
+                  patch.textbookTitle = opt.meta.textbookTitle;
+                }
+                if (
+                  opt.meta?.programNumber &&
+                  isEmptyOrProfileMatched(doc.programNumber, 'programNumber')
+                ) {
+                  patch.programNumber = opt.meta.programNumber;
+                }
+                update(patch);
+              }}
+              placeholder="np. AZ-11-01/18-20"
+              className={`${inputClass} font-mono-tabular`}
+              dropdownHeader="Numery podręczników z Profilu"
+            />
+          </Field>
+
+          <Field label="Tytuł i autor podręcznika">
+            <ProfileComboInput
+              value={doc.textbookTitle}
+              onChange={(val) => update({ textbookTitle: val })}
+              options={getProfileTextbookOptions(profile, doc.subject, doc.className)}
+              onSelectOption={(opt) => {
+                const patch: Partial<EfektyNauczaniaDoc> = { textbookTitle: opt.value };
+                if (
+                  opt.meta?.textbookNumber &&
+                  isEmptyOrProfileMatched(doc.textbookNumber, 'textbookNumber')
+                ) {
+                  patch.textbookNumber = opt.meta.textbookNumber;
+                }
+                if (
+                  opt.meta?.programNumber &&
+                  isEmptyOrProfileMatched(doc.programNumber, 'programNumber')
+                ) {
+                  patch.programNumber = opt.meta.programNumber;
+                }
+                update(patch);
+              }}
+              placeholder="np. Matematyka z plusem 4, GWO (praca zbiorowa)"
+              dropdownHeader="Podręczniki zapisane w Profilu"
+            />
+          </Field>
+
+          {canApplyFromProfile && matchedAssignment && (
+            <div className="md:col-span-2 flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-950">
+              <span>
+                W Profilu zapisano program i podręcznik dla przedmiotu{' '}
+                <strong>
+                  {matchedAssignment.subject}
+                  {matchedAssignment.classScope?.trim()
+                    ? ` (kl. ${matchedAssignment.classScope.trim()})`
+                    : ''}
+                </strong>
+                .
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  update({
+                    programNumber:
+                      matchedAssignment.programNumber || doc.programNumber,
+                    textbookNumber:
+                      matchedAssignment.textbookNumber || doc.textbookNumber || '',
+                    textbookTitle:
+                      matchedAssignment.textbookTitle || doc.textbookTitle,
+                  })
+                }
+                className="inline-flex items-center gap-1 rounded-md bg-blue-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-800 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <BookCheck className="w-3.5 h-3.5" />
+                <span>Wczytaj z Profilu</span>
+              </button>
+            </div>
+          )}
         </div>
       </section>
 

@@ -1,12 +1,19 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { TeacherProfile } from '../../types/reports';
+import { SubjectAssignment, TeacherProfile } from '../../types/reports';
+import { scoreClassScopeMatch } from '../../utils/documentFactory';
 import { inputClass } from './FormPrimitives';
 
 export interface ProfileComboOption {
   value: string;
   label?: string;
   subtitle?: string;
+  meta?: {
+    programNumber?: string;
+    textbookNumber?: string;
+    textbookTitle?: string;
+    classScope?: string;
+  };
 }
 
 interface ProfileComboInputProps {
@@ -56,8 +63,11 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
   }, [isOpen]);
 
   const handleSelect = (opt: ProfileComboOption) => {
-    onChange(opt.value);
-    onSelectOption?.(opt);
+    if (onSelectOption) {
+      onSelectOption(opt);
+    } else {
+      onChange(opt.value);
+    }
     setIsOpen(false);
     setHighlightedIndex(-1);
   };
@@ -203,18 +213,70 @@ function dedupeOptions(items: ProfileComboOption[]): ProfileComboOption[] {
   return result;
 }
 
+function rankAssignments(
+  assignments: SubjectAssignment[],
+  subject?: string,
+  className?: string
+): SubjectAssignment[] {
+  const normSubj = subject?.trim().toLowerCase() ?? '';
+  const trimmedClass = className?.trim() ?? '';
+
+  return [...assignments].sort((a, b) => {
+    const aSubjMatch = normSubj && a.subject.trim().toLowerCase() === normSubj ? 1 : 0;
+    const bSubjMatch = normSubj && b.subject.trim().toLowerCase() === normSubj ? 1 : 0;
+    if (aSubjMatch !== bSubjMatch) return bSubjMatch - aSubjMatch;
+
+    if (trimmedClass) {
+      const aScore = scoreClassScopeMatch(a.classScope ?? '', trimmedClass);
+      const bScore = scoreClassScopeMatch(b.classScope ?? '', trimmedClass);
+      if (aScore !== bScore) return bScore - aScore;
+    }
+
+    return 0;
+  });
+}
+
+function formatAssignmentSubtitle(a: SubjectAssignment, extra?: string): string | undefined {
+  const parts: string[] = [];
+  if (a.subject.trim()) {
+    parts.push(
+      a.classScope?.trim() ? `${a.subject.trim()} (kl. ${a.classScope.trim()})` : a.subject.trim()
+    );
+  } else if (a.classScope?.trim()) {
+    parts.push(`kl. ${a.classScope.trim()}`);
+  }
+  if (extra) parts.push(extra);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
 export function getProfileSubjectOptions(profile: TeacherProfile): ProfileComboOption[] {
-  const fromAssignments: ProfileComboOption[] = profile.subjectAssignments
-    .filter((a) => a.subject.trim().length > 0)
-    .map((a) => {
-      const parts: string[] = [];
-      if (a.programNumber.trim()) parts.push(`Prog.: ${a.programNumber.trim()}`);
-      if (a.textbookTitle.trim()) parts.push(`Podr.: ${a.textbookTitle.trim()}`);
-      return {
-        value: a.subject.trim(),
-        subtitle: parts.length > 0 ? parts.join(' · ') : undefined,
-      };
-    });
+  const grouped = new Map<string, SubjectAssignment[]>();
+  for (const a of profile.subjectAssignments) {
+    const subj = a.subject.trim();
+    if (!subj) continue;
+    const key = subj.toLowerCase();
+    const list = grouped.get(key) ?? [];
+    list.push(a);
+    grouped.set(key, list);
+  }
+
+  const fromAssignments: ProfileComboOption[] = Array.from(grouped.values()).map((items) => {
+    const subjectName = items[0].subject.trim();
+    const scopes = Array.from(
+      new Set(items.map((i) => i.classScope?.trim()).filter(Boolean))
+    );
+    const programs = Array.from(
+      new Set(items.map((i) => i.programNumber.trim()).filter(Boolean))
+    );
+    const parts: string[] = [];
+    if (scopes.length > 0) parts.push(`kl. ${scopes.join(', ')}`);
+    if (programs.length > 0) parts.push(`Prog.: ${programs.join(', ')}`);
+    if (items.length > 1) parts.push(`${items.length} warianty`);
+    return {
+      value: subjectName,
+      subtitle: parts.length > 0 ? parts.join(' · ') : undefined,
+    };
+  });
 
   const fromList: ProfileComboOption[] = profile.subjectsList.map((s) => ({
     value: s.trim(),
@@ -242,24 +304,74 @@ export function getProfileClassOptions(
   return dedupeOptions(items);
 }
 
-export function getProfileProgramOptions(profile: TeacherProfile): ProfileComboOption[] {
+export function getProfileProgramOptions(
+  profile: TeacherProfile,
+  subject?: string,
+  className?: string
+): ProfileComboOption[] {
+  const ranked = rankAssignments(profile.subjectAssignments, subject, className);
   return dedupeOptions(
-    profile.subjectAssignments
+    ranked
       .filter((a) => a.programNumber.trim().length > 0)
       .map((a) => ({
         value: a.programNumber.trim(),
-        subtitle: a.subject.trim() ? `Przedmiot: ${a.subject.trim()}` : undefined,
+        subtitle: formatAssignmentSubtitle(a),
+        meta: {
+          programNumber: a.programNumber.trim(),
+          textbookNumber: a.textbookNumber?.trim() ?? '',
+          textbookTitle: a.textbookTitle.trim(),
+          classScope: a.classScope?.trim() ?? '',
+        },
       }))
   );
 }
 
-export function getProfileTextbookOptions(profile: TeacherProfile): ProfileComboOption[] {
+export function getProfileTextbookNumberOptions(
+  profile: TeacherProfile,
+  subject?: string,
+  className?: string
+): ProfileComboOption[] {
+  const ranked = rankAssignments(profile.subjectAssignments, subject, className);
   return dedupeOptions(
-    profile.subjectAssignments
+    ranked
+      .filter((a) => (a.textbookNumber ?? '').trim().length > 0)
+      .map((a) => ({
+        value: (a.textbookNumber ?? '').trim(),
+        subtitle: formatAssignmentSubtitle(
+          a,
+          a.textbookTitle.trim() ? a.textbookTitle.trim() : undefined
+        ),
+        meta: {
+          programNumber: a.programNumber.trim(),
+          textbookNumber: (a.textbookNumber ?? '').trim(),
+          textbookTitle: a.textbookTitle.trim(),
+          classScope: a.classScope?.trim() ?? '',
+        },
+      }))
+  );
+}
+
+export function getProfileTextbookOptions(
+  profile: TeacherProfile,
+  subject?: string,
+  className?: string
+): ProfileComboOption[] {
+  const ranked = rankAssignments(profile.subjectAssignments, subject, className);
+  return dedupeOptions(
+    ranked
       .filter((a) => a.textbookTitle.trim().length > 0)
       .map((a) => ({
         value: a.textbookTitle.trim(),
-        subtitle: a.subject.trim() ? `Przedmiot: ${a.subject.trim()}` : undefined,
+        subtitle: formatAssignmentSubtitle(
+          a,
+          (a.textbookNumber ?? '').trim() ? `Nr: ${(a.textbookNumber ?? '').trim()}` : undefined
+        ),
+        meta: {
+          programNumber: a.programNumber.trim(),
+          textbookNumber: (a.textbookNumber ?? '').trim(),
+          textbookTitle: a.textbookTitle.trim(),
+          classScope: a.classScope?.trim() ?? '',
+        },
       }))
   );
 }

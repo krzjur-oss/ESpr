@@ -147,8 +147,14 @@ const EfektyNauczaniaPrint: React.FC<{ doc: EfektyNauczaniaDoc }> = ({ doc }) =>
           <th className="bg-slate-50 px-2.5 py-1.5 text-left font-semibold text-slate-700 border-r border-slate-300">
             Podręcznik
           </th>
-          <td colSpan={3} className="px-2.5 py-1.5">
+          <td className="px-2.5 py-1.5 border-r border-slate-300">
             {doc.textbookTitle || '—'}
+          </td>
+          <th className="bg-slate-50 px-2.5 py-1.5 text-left font-semibold text-slate-700 border-r border-slate-300">
+            Nr podręcznika
+          </th>
+          <td className="px-2.5 py-1.5 font-mono-tabular">
+            {doc.textbookNumber || '—'}
           </td>
         </tr>
       </tbody>

@@ -23,7 +23,9 @@ export type SpecialistRole =
 export interface SubjectAssignment {
   id: string;
   subject: string;
+  classScope: string;
   programNumber: string;
+  textbookNumber: string;
   textbookTitle: string;
 }
 
@@ -53,6 +55,7 @@ export interface EfektyNauczaniaDoc {
   teacherName: string;
   subject: string;
   programNumber: string;
+  textbookNumber: string;
   textbookTitle: string;
   className: string;
   curriculumStatus: CurriculumStatus;

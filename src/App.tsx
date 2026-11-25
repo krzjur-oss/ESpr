@@ -272,11 +272,12 @@ export default function App() {
           };
 
           if (base.type === 'efekty_nauczania') {
-            const assignment = findSubjectAssignment(prev.profile, base.subject);
+            const assignment = findSubjectAssignment(prev.profile, base.subject, base.className);
             return {
               ...base,
               teacherName: prev.profile.fullName || base.teacherName,
               programNumber: assignment?.programNumber || base.programNumber,
+              textbookNumber: assignment?.textbookNumber || base.textbookNumber || '',
               textbookTitle: assignment?.textbookTitle || base.textbookTitle,
             };
           }

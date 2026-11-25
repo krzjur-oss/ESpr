@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   Upload,
   X,
@@ -24,6 +25,15 @@ import {
   TEMPLATE_CATEGORY_LABELS,
   TemplateSectionCategory,
 } from '../types/reports';
+import {
+  SearchMatchMode,
+  SearchScope,
+  SearchSourceFilter,
+  parseSearchQuery,
+  scoreTextMatch,
+  scoreWniosekItemMatch,
+} from '../utils/wnioskiSearch';
+import { HighlightedText } from './HighlightedText';
 
 interface WnioskiDatabaseViewProps {
   customWnioski: CustomWniosekEntry[];
@@ -64,6 +74,11 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
   // Conclusions state
   const [search, setSearch] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [searchScope, setSearchScope] = useState<SearchScope>('all');
+  const [matchMode, setMatchMode] = useState<SearchMatchMode>('all');
+  const [sourceFilter, setSourceFilter] = useState<SearchSourceFilter>('all');
+  const [ignoreDiacritics, setIgnoreDiacritics] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [insertedKey, setInsertedKey] = useState<string | null>(null);
   const [newCategoryId, setNewCategoryId] = useState<string>(CUSTOM_WNIOSKI_CATEGORY_ID);
@@ -92,40 +107,128 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
     [mergedCategories]
   );
 
+  const parsedQuery = useMemo(
+    () => parseSearchQuery(search, ignoreDiacritics),
+    [search, ignoreDiacritics]
+  );
+
+  const hasNonDefaultSearchOptions =
+    searchScope !== 'all' ||
+    matchMode !== 'all' ||
+    sourceFilter !== 'all' ||
+    !ignoreDiacritics;
+
+  const hasActiveFilters =
+    search.trim().length > 0 || selectedGroup !== 'all' || hasNonDefaultSearchOptions;
+
+  const resetSearchFilters = () => {
+    setSearch('');
+    setSelectedGroup('all');
+    setSearchScope('all');
+    setMatchMode('all');
+    setSourceFilter('all');
+    setIgnoreDiacritics(true);
+  };
+
   const filteredCategories = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return mergedCategories
-      .filter((cat) => {
-        if (selectedGroup !== 'all' && cat.group !== selectedGroup) return false;
-        if (!q) return true;
-        return (
-          cat.label.toLowerCase().includes(q) ||
-          cat.items.some((item) => item.text.toLowerCase().includes(q))
-        );
-      })
+    const hasQuery = parsedQuery.allTerms.length > 0;
+    const options = {
+      query: search,
+      scope: searchScope,
+      matchMode,
+      ignoreDiacritics,
+    };
+
+    const scoredCategories = mergedCategories
+      .filter((cat) => selectedGroup === 'all' || cat.group === selectedGroup)
       .map((cat) => {
-        if (!q) return cat;
+        const sourceItems = cat.items.filter((item) => {
+          if (sourceFilter === 'custom') return item.isCustom;
+          if (sourceFilter === 'builtin') return !item.isCustom;
+          return true;
+        });
+
+        if (!hasQuery) {
+          return {
+            ...cat,
+            items: sourceItems,
+            bestScore: 1,
+          };
+        }
+
+        const scoredItems = sourceItems
+          .map((item) => ({
+            item,
+            score: scoreWniosekItemMatch(cat.label, cat.group, item.text, parsedQuery, options),
+          }))
+          .filter((entry) => entry.score > 0)
+          .sort((a, b) => b.score - a.score);
+
         return {
           ...cat,
-          items: cat.items.filter(
-            (i) => i.text.toLowerCase().includes(q) || cat.label.toLowerCase().includes(q)
-          ),
+          items: scoredItems.map((entry) => entry.item),
+          bestScore: scoredItems[0]?.score ?? 0,
         };
-      });
-  }, [mergedCategories, search, selectedGroup]);
+      })
+      .filter((cat) => cat.items.length > 0);
+
+    if (hasQuery) {
+      scoredCategories.sort((a, b) => b.bestScore - a.bestScore);
+    }
+
+    return scoredCategories;
+  }, [
+    mergedCategories,
+    selectedGroup,
+    sourceFilter,
+    parsedQuery,
+    search,
+    searchScope,
+    matchMode,
+    ignoreDiacritics,
+  ]);
+
+  const totalMatchedItems = useMemo(
+    () => filteredCategories.reduce((sum, cat) => sum + cat.items.length, 0),
+    [filteredCategories]
+  );
+
+  const parsedTplQuery = useMemo(
+    () => parseSearchQuery(tplSearch, true),
+    [tplSearch]
+  );
 
   const filteredTemplates = useMemo(() => {
-    const q = tplSearch.trim().toLowerCase();
-    return customTemplates.filter((tpl) => {
+    const hasQuery = parsedTplQuery.allTerms.length > 0;
+    const list = customTemplates.filter((tpl) => {
       if (tplCategoryFilter !== 'all' && tpl.category !== tplCategoryFilter) return false;
-      if (!q) return true;
+      if (!hasQuery) return true;
       return (
-        tpl.title.toLowerCase().includes(q) ||
-        tpl.content.toLowerCase().includes(q) ||
-        TEMPLATE_CATEGORY_LABELS[tpl.category].toLowerCase().includes(q)
+        scoreTextMatch(
+          [tpl.title, tpl.content, TEMPLATE_CATEGORY_LABELS[tpl.category]],
+          parsedTplQuery,
+          'all',
+          true
+        ) > 0
       );
     });
-  }, [customTemplates, tplSearch, tplCategoryFilter]);
+    if (!hasQuery) return list;
+    return [...list].sort(
+      (a, b) =>
+        scoreTextMatch(
+          [b.title, b.content, TEMPLATE_CATEGORY_LABELS[b.category]],
+          parsedTplQuery,
+          'all',
+          true
+        ) -
+        scoreTextMatch(
+          [a.title, a.content, TEMPLATE_CATEGORY_LABELS[a.category]],
+          parsedTplQuery,
+          'all',
+          true
+        )
+    );
+  }, [customTemplates, tplSearch, tplCategoryFilter, parsedTplQuery]);
 
   const handleCopy = async (text: string, key: string) => {
     try {
@@ -319,35 +422,203 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
             </div>
           </form>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Szukaj po przedmiocie lub słowie (np. AI, rozprawka, logopeda)..."
-                className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:outline-none"
-              />
+          <div className="space-y-3 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+              <div className="relative md:col-span-6">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder='Szukaj w treści i tytułach (np. ortografia list, "ze zrozumieniem")...'
+                  className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:outline-none"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    aria-label="Wyczyść frazę wyszukiwania"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <div className="md:col-span-4">
+                <select
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-blue-900 focus:outline-none"
+                >
+                  <option value="all">Wszystkie grupy ({mergedCategories.length} kategorii)</option>
+                  {groups.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedSearch((v) => !v)}
+                  aria-expanded={showAdvancedSearch}
+                  className={`w-full h-full inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                    showAdvancedSearch || hasNonDefaultSearchOptions
+                      ? 'border-blue-900 bg-blue-50 text-blue-900'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+                  <span>Zaawansowane</span>
+                </button>
+              </div>
             </div>
-            <select
-              value={selectedGroup}
-              onChange={(e) => setSelectedGroup(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-blue-900 focus:outline-none"
-            >
-              <option value="all">Wszystkie grupy ({mergedCategories.length} kategorii)</option>
-              {groups.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
+
+            {showAdvancedSearch && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3.5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                      Zakres wyszukiwania
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-200/70 p-1">
+                      {(
+                        [
+                          { id: 'all', label: 'Tytuł i treść' },
+                          { id: 'content', label: 'Tylko treść' },
+                          { id: 'title', label: 'Tylko tytuły' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setSearchScope(opt.id)}
+                          className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
+                            searchScope === opt.id
+                              ? 'bg-white text-blue-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                      Dopasowanie wielu słów
+                    </p>
+                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-200/70 p-1">
+                      {(
+                        [
+                          { id: 'all', label: 'Wszystkie słowa' },
+                          { id: 'any', label: 'Dowolne słowo' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setMatchMode(opt.id)}
+                          className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
+                            matchMode === opt.id
+                              ? 'bg-white text-blue-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                      Źródło wniosków
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-200/70 p-1">
+                      {(
+                        [
+                          { id: 'all', label: 'Wszystkie' },
+                          { id: 'builtin', label: 'Systemowe' },
+                          { id: 'custom', label: 'Własne' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setSourceFilter(opt.id)}
+                          className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
+                            sourceFilter === opt.id
+                              ? 'bg-white text-blue-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-3">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={ignoreDiacritics}
+                      onChange={(e) => setIgnoreDiacritics(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
+                    />
+                    <span>Ignoruj polskie znaki (np. ł/l, ą/a, ć/c)</span>
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Wskazówka: użyj cudzysłowu{' '}
+                    <span className="font-mono-tabular text-slate-700">"dokładna fraza"</span> lub
+                    wpisz kilka słów w dowolnej kolejności.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {hasActiveFilters && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-600">
+                <span className="tabular-nums">
+                  Znaleziono <strong className="text-slate-900">{totalMatchedItems}</strong>{' '}
+                  {totalMatchedItems === 1
+                    ? 'wniosek'
+                    : totalMatchedItems >= 2 && totalMatchedItems <= 4
+                      ? 'wnioski'
+                      : 'wniosków'}{' '}
+                  w <strong className="text-slate-900">{filteredCategories.length}</strong>{' '}
+                  {filteredCategories.length === 1 ? 'kategorii' : 'kategoriach'}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetSearchFilters}
+                  className="font-semibold text-blue-900 hover:underline cursor-pointer"
+                >
+                  Wyczyść filtry
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-8">
             {filteredCategories.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-                Nie znaleziono wniosków dla podanych kryteriów wyszukiwania.
+              <div className="rounded-xl border border-slate-200 bg-white p-10 text-center space-y-2">
+                <p className="text-sm text-slate-600">
+                  Nie znaleziono wniosków dla podanych kryteriów wyszukiwania.
+                </p>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={resetSearchFilters}
+                    className="text-xs font-semibold text-blue-900 hover:underline cursor-pointer"
+                  >
+                    Przywróć wszystkie wnioski
+                  </button>
+                )}
               </div>
             ) : (
               filteredCategories.map((cat) => (
@@ -356,7 +627,14 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                   className="rounded-xl border border-slate-200 bg-white p-6"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 pb-3 mb-4">
-                    <h2 className="text-base font-semibold text-slate-900">{cat.label}</h2>
+                    <h2 className="text-base font-semibold text-slate-900">
+                      <HighlightedText
+                        text={cat.label}
+                        terms={parsedQuery.allTerms}
+                        ignoreDiacritics={ignoreDiacritics}
+                        active={searchScope !== 'content'}
+                      />
+                    </h2>
                     <span className="text-xs text-slate-500">{cat.group}</span>
                   </div>
 
@@ -371,7 +649,14 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                           className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                         >
                           <div className="space-y-0.5">
-                            <p className="text-sm text-slate-800 leading-relaxed">{item.text}</p>
+                            <p className="text-sm text-slate-800 leading-relaxed">
+                              <HighlightedText
+                                text={item.text}
+                                terms={parsedQuery.allTerms}
+                                ignoreDiacritics={ignoreDiacritics}
+                                active={searchScope !== 'title'}
+                              />
+                            </p>
                             {item.isCustom && (
                               <p className="text-xs text-blue-900 font-medium">Własny wpis</p>
                             )}
@@ -511,8 +796,18 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                 value={tplSearch}
                 onChange={(e) => setTplSearch(e.target.value)}
                 placeholder="Szukaj szablonu po nazwie lub treści..."
-                className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:outline-none"
               />
+              {tplSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTplSearch('')}
+                  aria-label="Wyczyść szukanie szablonów"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             <select
               value={tplCategoryFilter}
@@ -612,13 +907,23 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                         <div className="space-y-1.5 min-w-0 flex-1">
                           <div className="flex flex-wrap items-baseline gap-2">
-                            <h3 className="text-sm font-semibold text-slate-900">{tpl.title}</h3>
+                            <h3 className="text-sm font-semibold text-slate-900">
+                              <HighlightedText
+                                text={tpl.title}
+                                terms={parsedTplQuery.allTerms}
+                                active={parsedTplQuery.allTerms.length > 0}
+                              />
+                            </h3>
                             <span className="text-xs text-slate-500">
                               · {TEMPLATE_CATEGORY_LABELS[tpl.category]}
                             </span>
                           </div>
                           <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                            {tpl.content}
+                            <HighlightedText
+                              text={tpl.content}
+                              terms={parsedTplQuery.allTerms}
+                              active={parsedTplQuery.allTerms.length > 0}
+                            />
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">

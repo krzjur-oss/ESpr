@@ -6,6 +6,7 @@ import {
   AppState,
   CustomTemplateEntry,
   CustomWniosekEntry,
+  ReportDocument,
   SubjectAssignment,
   TEMPLATE_CATEGORY_LABELS,
   TeacherProfile,
@@ -71,6 +72,18 @@ function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
     }));
 }
 
+function sanitizeDocuments(docs: ReportDocument[]): ReportDocument[] {
+  return docs.map((doc) => {
+    if (doc.type === 'efekty_nauczania') {
+      return {
+        ...doc,
+        textbookNumber: typeof doc.textbookNumber === 'string' ? doc.textbookNumber : '',
+      };
+    }
+    return doc;
+  });
+}
+
 function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
   const defaults = createDefaultProfile();
   const subjectsList = Array.isArray(raw.subjectsList)
@@ -84,14 +97,18 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
       .map((a) => ({
         id: typeof a.id === 'string' && a.id ? a.id : createId(),
         subject: a.subject,
+        classScope: typeof a.classScope === 'string' ? a.classScope : '',
         programNumber: typeof a.programNumber === 'string' ? a.programNumber : '',
+        textbookNumber: typeof a.textbookNumber === 'string' ? a.textbookNumber : '',
         textbookTitle: typeof a.textbookTitle === 'string' ? a.textbookTitle : '',
       }));
   } else {
     subjectAssignments = subjectsList.map((subject) => ({
       id: createId(),
       subject,
+      classScope: '',
       programNumber: '',
+      textbookNumber: '',
       textbookTitle: '',
     }));
   }
@@ -258,7 +275,7 @@ function readLegacyLocalStorage(): AppState | null {
     return {
       version: parsed.version ?? 1,
       profile: sanitizeProfile(parsed.profile),
-      documents: parsed.documents,
+      documents: sanitizeDocuments(parsed.documents),
       activeDocumentId: activeId,
       customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
       customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
@@ -431,7 +448,7 @@ export async function loadAppState(): Promise<{
       rawDocs.length > 0;
 
     if (hasExistingDbData) {
-      const orderedDocs = reorderByIds(rawDocs, metaMap.get('documentOrder'));
+      const orderedDocs = sanitizeDocuments(reorderByIds(rawDocs, metaMap.get('documentOrder')));
       const orderedWnioski = sanitizeCustomWnioski(
         reorderByIds(rawWnioski, metaMap.get('customWnioskiOrder'))
       );
@@ -585,7 +602,7 @@ export function validateAndParseImportedJson(jsonText: string): {
       state: {
         version: data.version ?? 1,
         profile: sanitizeProfile(data.profile),
-        documents: data.documents,
+        documents: sanitizeDocuments(data.documents),
         activeDocumentId,
         customWnioski: sanitizeCustomWnioski(data.customWnioski),
         customTemplates: sanitizeCustomTemplates(data.customTemplates),

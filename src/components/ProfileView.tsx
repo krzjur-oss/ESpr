@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Check, Copy, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { SemesterType, SubjectAssignment, TeacherProfile } from '../types/reports';
 import { createId } from '../utils/documentFactory';
 import { Field, SectionHeader, inputClass } from './forms/FormPrimitives';
@@ -19,7 +19,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [newClassInput, setNewClassInput] = useState('');
   const [newSubject, setNewSubject] = useState('');
+  const [newClassScope, setNewClassScope] = useState('');
   const [newProgramNumber, setNewProgramNumber] = useState('');
+  const [newTextbookNumber, setNewTextbookNumber] = useState('');
   const [newTextbookTitle, setNewTextbookTitle] = useState('');
   const [syncConfirmed, setSyncConfirmed] = useState(false);
 
@@ -58,13 +60,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     const entry: SubjectAssignment = {
       id: createId(),
       subject: subj,
+      classScope: newClassScope.trim(),
       programNumber: newProgramNumber.trim(),
+      textbookNumber: newTextbookNumber.trim(),
       textbookTitle: newTextbookTitle.trim(),
     };
     updateAssignments([...profile.subjectAssignments, entry]);
     setNewSubject('');
+    setNewClassScope('');
     setNewProgramNumber('');
+    setNewTextbookNumber('');
     setNewTextbookTitle('');
+  };
+
+  const duplicateAssignment = (source: SubjectAssignment) => {
+    const clone: SubjectAssignment = {
+      id: createId(),
+      subject: source.subject,
+      classScope: '',
+      programNumber: source.programNumber,
+      textbookNumber: '',
+      textbookTitle: '',
+    };
+    const idx = profile.subjectAssignments.findIndex((item) => item.id === source.id);
+    const next = [...profile.subjectAssignments];
+    next.splice(idx >= 0 ? idx + 1 : next.length, 0, clone);
+    updateAssignments(next);
   };
 
   const updateAssignmentItem = (id: string, patch: Partial<SubjectAssignment>) => {
@@ -292,71 +313,111 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <section>
           <SectionHeader
             index="03"
-            title="Stałe przypisanie przedmiotów, programów i podręczników"
-            subtitle="Po wpisaniu lub wyborze przedmiotu w karcie sprawozdania numer programu oraz podręcznik podstawią się automatycznie"
+            title="Stałe przypisanie przedmiotów, poziomów, programów i podręczników"
+            subtitle="Określ poziom lub klasy (np. 1-4, 5-8, 4, 5A) — po wyborze przedmiotu i klasy w karcie automatycznie podstawi się odpowiedni program, tytuł oraz numer podręcznika"
           />
 
           {/* Existing subject assignments */}
           <div className="space-y-3 mb-5">
             {profile.subjectAssignments.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
-                Brak przypisanych przedmiotów. Dodaj pierwszy przedmiot i jego program poniżej.
+                Brak przypisanych przedmiotów. Dodaj pierwszy wariant przedmiotu i programu poniżej.
               </div>
             ) : (
               profile.subjectAssignments.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end rounded-lg border border-slate-200 bg-slate-50/70 p-3.5"
+                  className="rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 space-y-3"
                 >
-                  <div className="md:col-span-3">
-                    <Field label="Przedmiot / zajęcia">
-                      <input
-                        type="text"
-                        value={item.subject}
-                        onChange={(e) =>
-                          updateAssignmentItem(item.id, { subject: e.target.value })
-                        }
-                        placeholder="np. Matematyka"
-                        className={inputClass}
-                      />
-                    </Field>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div className="md:col-span-4">
+                      <Field label="Przedmiot / zajęcia">
+                        <input
+                          type="text"
+                          value={item.subject}
+                          onChange={(e) =>
+                            updateAssignmentItem(item.id, { subject: e.target.value })
+                          }
+                          placeholder="np. Religia, Matematyka"
+                          className={inputClass}
+                        />
+                      </Field>
+                    </div>
+                    <div className="md:col-span-3">
+                      <Field label="Zakres klas">
+                        <input
+                          type="text"
+                          value={item.classScope}
+                          onChange={(e) =>
+                            updateAssignmentItem(item.id, { classScope: e.target.value })
+                          }
+                          placeholder="np. 1-4, 5A"
+                          className={`${inputClass} font-mono-tabular`}
+                        />
+                      </Field>
+                    </div>
+                    <div className="md:col-span-4">
+                      <Field label="Numer programu nauczania">
+                        <input
+                          type="text"
+                          value={item.programNumber}
+                          onChange={(e) =>
+                            updateAssignmentItem(item.id, { programNumber: e.target.value })
+                          }
+                          placeholder="np. AZ-1-01/18"
+                          className={`${inputClass} font-mono-tabular`}
+                        />
+                      </Field>
+                    </div>
+                    <div className="md:col-span-1 flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => duplicateAssignment(item)}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-900 transition-colors cursor-pointer"
+                        aria-label={`Powiel wpis ${item.subject} dla kolejnej klasy`}
+                        title="Powiel przedmiot i program dla kolejnej klasy"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeAssignment(item.id)}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors cursor-pointer"
+                        aria-label={`Usuń przypisanie ${item.subject}`}
+                        title="Usuń przypisanie"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="md:col-span-4">
-                    <Field label="Numer programu nauczania">
-                      <input
-                        type="text"
-                        value={item.programNumber}
-                        onChange={(e) =>
-                          updateAssignmentItem(item.id, { programNumber: e.target.value })
-                        }
-                        placeholder="np. DKOS-5002-12/18"
-                        className={`${inputClass} font-mono-tabular`}
-                      />
-                    </Field>
-                  </div>
-                  <div className="md:col-span-4">
-                    <Field label="Tytuł i autor podręcznika">
-                      <input
-                        type="text"
-                        value={item.textbookTitle}
-                        onChange={(e) =>
-                          updateAssignmentItem(item.id, { textbookTitle: e.target.value })
-                        }
-                        placeholder="np. Matematyka z plusem, GWO"
-                        className={inputClass}
-                      />
-                    </Field>
-                  </div>
-                  <div className="md:col-span-1 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => removeAssignment(item.id)}
-                      className="rounded-lg border border-slate-200 bg-white p-2 text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors cursor-pointer"
-                      aria-label={`Usuń przypisanie ${item.subject}`}
-                      title="Usuń przypisanie"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    <div className="md:col-span-4">
+                      <Field label="Numer zatwierdzenia podręcznika">
+                        <input
+                          type="text"
+                          value={item.textbookNumber}
+                          onChange={(e) =>
+                            updateAssignmentItem(item.id, { textbookNumber: e.target.value })
+                          }
+                          placeholder="np. AZ-11-01/18-20"
+                          className={`${inputClass} font-mono-tabular`}
+                        />
+                      </Field>
+                    </div>
+                    <div className="md:col-span-8">
+                      <Field label="Tytuł i autor podręcznika">
+                        <input
+                          type="text"
+                          value={item.textbookTitle}
+                          onChange={(e) =>
+                            updateAssignmentItem(item.id, { textbookTitle: e.target.value })
+                          }
+                          placeholder="np. Poznaję Boży świat, Wydawnictwo Jedność"
+                          className={inputClass}
+                        />
+                      </Field>
+                    </div>
                   </div>
                 </div>
               ))
@@ -365,32 +426,65 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {/* Add new assignment row */}
           <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-            <p className="text-xs font-semibold text-slate-700">Dodaj nowy przedmiot i program</p>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold text-slate-700">
+                Dodaj nowy wariant przedmiotu, poziomu i podręcznika
+              </p>
+              <span className="text-[11px] text-slate-500">
+                Możesz dodać wiele wierszy dla tego samego przedmiotu (np. kl. 1, 2, 1-4, 5-8).
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-3">
+              <div className="md:col-span-5">
                 <Field label="Przedmiot">
                   <input
                     type="text"
                     value={newSubject}
                     onChange={(e) => setNewSubject(e.target.value)}
-                    placeholder="np. Informatyka"
+                    placeholder="np. Religia"
                     className={inputClass}
                   />
                 </Field>
               </div>
               <div className="md:col-span-3">
-                <Field label="Nr programu">
+                <Field label="Zakres klas">
                   <input
                     type="text"
-                    value={newProgramNumber}
-                    onChange={(e) => setNewProgramNumber(e.target.value)}
-                    placeholder="np. DKOS-..."
+                    value={newClassScope}
+                    onChange={(e) => setNewClassScope(e.target.value)}
+                    placeholder="np. 1-4, 5A"
                     className={`${inputClass} font-mono-tabular`}
                   />
                 </Field>
               </div>
               <div className="md:col-span-4">
-                <Field label="Podręcznik">
+                <Field label="Nr programu">
+                  <input
+                    type="text"
+                    value={newProgramNumber}
+                    onChange={(e) => setNewProgramNumber(e.target.value)}
+                    placeholder="np. AZ-1-01/18"
+                    className={`${inputClass} font-mono-tabular`}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-4">
+                <Field label="Numer zatwierdzenia podręcznika">
+                  <input
+                    type="text"
+                    value={newTextbookNumber}
+                    onChange={(e) => setNewTextbookNumber(e.target.value)}
+                    placeholder="np. AZ-11-01/18-20"
+                    className={`${inputClass} font-mono-tabular`}
+                  />
+                </Field>
+              </div>
+              <div className="md:col-span-6">
+                <Field label="Tytuł i autor podręcznika">
                   <input
                     type="text"
                     value={newTextbookTitle}

@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.5';
+export const APP_VERSION = '1.6';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.6',
+    date: '25.11.2026',
+    title: 'Poziomy klas i numery zatwierdzenia podręczników w Profilu',
+    summary:
+      'Przypisania przedmiotów w Profilu obsługują teraz zakresy klas oraz osobny numer podręcznika z automatycznym dopasowaniem.',
+    changes: [
+      'Dodano pole „Poziom / klasy” (np. 1-4, 5-8, 4, 5A) oraz „Numer podręcznika / zatwierdzenia” przy stałych przypisaniach w Profilu, wraz z szybkim powielaniem wpisu dla kolejnych klas.',
+      'Rozbudowano Kartę efektów nauczania oraz wydruk A4 o dedykowane pole i komórkę tabeli dla numeru podręcznika.',
+      'Wprowadzono automatyczne dopasowywanie programu, tytułu oraz numeru podręcznika na podstawie zarówno wybranego przedmiotu, jak i klasy.',
+    ],
+  },
   {
     version: '1.5',
     date: '25.11.2026',
