@@ -276,6 +276,10 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
             )}
           </div>
 
+          <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs text-amber-900 leading-relaxed">
+            <strong>Uwaga RODO:</strong> Eksportowana paczka JSON może zawierać imiona i nazwiska uczniów oraz dane profilu (dane osobowe). Plik nie jest szyfrowany — przekaż go dyrekcji bezpiecznym kanałem i usuń z dysku po zaimportowaniu.
+          </div>
+
           {exportedDone && (
             <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-900">
               <FileCheck2 className="w-4 h-4 text-emerald-700 shrink-0" />

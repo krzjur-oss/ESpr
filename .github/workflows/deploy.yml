@@ -29,12 +29,8 @@ jobs:
           node-version: 22
 
       - name: Zainstaluj zależności
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        # Wymaga obecności pliku package-lock.json w repozytorium
+        run: npm ci
 
       - name: Sprawdź typy TypeScript
         run: npm run lint

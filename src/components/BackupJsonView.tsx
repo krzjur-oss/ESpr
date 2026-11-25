@@ -35,11 +35,8 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
       const text = typeof reader.result === 'string' ? reader.result : '';
       const parsed = validateAndParseImportedJson(text);
       if (parsed.ok) {
+        setFeedback(null);
         onImportState(parsed.state);
-        setFeedback({
-          type: 'success',
-          message: `Wczytano kopię zapasową: ${parsed.state.documents.length} dokumentów oraz profil nauczyciela.`,
-        });
       } else {
         setFeedback({
           type: 'error',
@@ -114,6 +111,9 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                 Szablony własne fragmentów:{' '}
                 <strong className="font-mono-tabular text-slate-900">{state.customTemplates.length}</strong>
               </p>
+            </div>
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 leading-relaxed">
+              <strong>Uwaga RODO:</strong> Plik kopii JSON może zawierać imiona i nazwiska uczniów oraz inne dane osobowe. Plik nie jest szyfrowany — przekazuj go wyłącznie bezpiecznym kanałem i usuń po użyciu.
             </div>
           </div>
 

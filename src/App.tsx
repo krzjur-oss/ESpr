@@ -1,22 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
+  AlertTriangle,
+  Download,
   Eye,
   FilePlus2,
   FileText,
   PanelRightClose,
   PanelRightOpen,
   Printer,
+  RefreshCw,
   UserCog,
 } from 'lucide-react';
-import { AboutSection, AboutView } from './components/AboutView';
+import type { AboutSection } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import {
-  DirectorSupervisionView,
-  SupervisionImportFeedback,
-} from './components/DirectorSupervisionView';
+import type { SupervisionImportFeedback } from './components/DirectorSupervisionView';
 import { DocumentSidebar, DocumentSortOption } from './components/DocumentSidebar';
 import { ExportSupervisionModal } from './components/ExportSupervisionModal';
 import { NewYearRolloverModal } from './components/NewYearRolloverModal';
@@ -32,7 +32,6 @@ import {
 import { SupervisionDiffModal } from './components/SupervisionDiffModal';
 import { TemplatePickerModal } from './components/TemplatePickerModal';
 import { TopBar } from './components/TopBar';
-import { WnioskiDatabaseView } from './components/WnioskiDatabaseView';
 import { EfektyNauczaniaForm } from './components/forms/EfektyNauczaniaForm';
 import { KartaInformacyjnaForm } from './components/forms/KartaInformacyjnaForm';
 import { PodsumowanieSpecjalistyForm } from './components/forms/PodsumowanieSpecjalistyForm';
@@ -74,14 +73,19 @@ import {
 } from './utils/documentFactory';
 import { triggerWindowPrint } from './utils/printDocument';
 import {
+  exportStateAsJson,
   flushPendingAppStateSave,
+  getSaveStatus,
   loadAppState,
   mergeImportedTemplates,
   mergeImportedWnioski,
   resetAllStoredState,
   saveAppStateImmediate,
+  SaveStatus,
   scheduleSaveAppState,
   StorageBackend,
+  subscribeCrossTabChanges,
+  subscribeSaveStatus,
   validateAndParseSupervisionPackageJson,
 } from './utils/storage';
 import {
@@ -94,12 +98,30 @@ import {
   resolvePackageTeacherName,
 } from './utils/supervision';
 
+const AboutView = lazy(() =>
+  import('./components/AboutView').then((m) => ({ default: m.AboutView }))
+);
+const DirectorSupervisionView = lazy(() =>
+  import('./components/DirectorSupervisionView').then((m) => ({
+    default: m.DirectorSupervisionView,
+  }))
+);
+const WnioskiDatabaseView = lazy(() =>
+  import('./components/WnioskiDatabaseView').then((m) => ({
+    default: m.WnioskiDatabaseView,
+  }))
+);
+
 type EditorLayoutMode = 'split' | 'editor' | 'preview';
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => createInitialAppState());
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [isHydrating, setIsHydrating] = useState(true);
   const [storageBackend, setStorageBackend] = useState<StorageBackend>('indexeddb');
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => getSaveStatus());
+  const [hasExternalTabUpdate, setHasExternalTabUpdate] = useState(false);
   const hasHydratedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<MainTab>('kreator');
   const [aboutSection, setAboutSection] = useState<AboutSection>('info');
@@ -120,6 +142,8 @@ export default function App() {
     useState<SharePhrasesModalMode | null>(null);
   const [exportSupervisionOpen, setExportSupervisionOpen] = useState(false);
   const [diffQueue, setDiffQueue] = useState<PackageDiffResult[]>([]);
+  const diffQueueRef = useRef(diffQueue);
+  diffQueueRef.current = diffQueue;
   const [diffQueueTotal, setDiffQueueTotal] = useState(0);
   const [supervisionYearFilter, setSupervisionYearFilter] = useState<string>('all');
   const [supervisionSemesterFilter, setSupervisionSemesterFilter] = useState<'all' | SemesterType>(
@@ -135,10 +159,12 @@ export default function App() {
     ClassCollectiveReport[] | null
   >(null);
 
+  const [backupDownloadFirst, setBackupDownloadFirst] = useState(true);
   const [confirmDialog, setConfirmDialog] = useState<
     | { kind: 'delete_doc'; doc: ReportDocument }
     | { kind: 'reset_doc'; doc: ReportDocument }
     | { kind: 'delete_supervision_pkg'; pkg: TeacherSupervisionPackage }
+    | { kind: 'import_backup'; nextState: AppState }
     | { kind: 'reset_all' }
     | null
   >(null);
@@ -155,6 +181,18 @@ export default function App() {
     });
     return () => {
       active = false;
+    };
+  }, []);
+
+  // Subscribe to IndexedDB write status and cross-tab notifications
+  useEffect(() => {
+    const unsubSave = subscribeSaveStatus(setSaveStatus);
+    const unsubCrossTab = subscribeCrossTabChanges(() => {
+      setHasExternalTabUpdate(true);
+    });
+    return () => {
+      unsubSave();
+      unsubCrossTab();
     };
   }, []);
 
@@ -571,23 +609,29 @@ export default function App() {
   };
 
   const handleImportPhrases = (payload: PhrasesImportPayload): PhrasesImportSummary => {
-    const wnioskiOutcome = payload.includeWnioski
-      ? mergeImportedWnioski(state.customWnioski, payload.incomingWnioski, payload.mode)
-      : { entries: state.customWnioski, added: 0, skippedDuplicates: 0 };
-    const templatesOutcome = payload.includeTemplates
-      ? mergeImportedTemplates(state.customTemplates, payload.incomingTemplates, payload.mode)
-      : { entries: state.customTemplates, added: 0, skippedDuplicates: 0 };
+    const snapshot = stateRef.current;
+    const wnioskiSummary = payload.includeWnioski
+      ? mergeImportedWnioski(snapshot.customWnioski, payload.incomingWnioski, payload.mode)
+      : { entries: snapshot.customWnioski, added: 0, skippedDuplicates: 0 };
+    const templatesSummary = payload.includeTemplates
+      ? mergeImportedTemplates(snapshot.customTemplates, payload.incomingTemplates, payload.mode)
+      : { entries: snapshot.customTemplates, added: 0, skippedDuplicates: 0 };
 
     setState((prev) => ({
       ...prev,
-      customWnioski: wnioskiOutcome.entries,
-      customTemplates: templatesOutcome.entries,
+      customWnioski: payload.includeWnioski
+        ? mergeImportedWnioski(prev.customWnioski, payload.incomingWnioski, payload.mode).entries
+        : prev.customWnioski,
+      customTemplates: payload.includeTemplates
+        ? mergeImportedTemplates(prev.customTemplates, payload.incomingTemplates, payload.mode)
+            .entries
+        : prev.customTemplates,
     }));
 
     return {
-      addedWnioski: wnioskiOutcome.added,
-      addedTemplates: templatesOutcome.added,
-      skippedDuplicates: wnioskiOutcome.skippedDuplicates + templatesOutcome.skippedDuplicates,
+      addedWnioski: wnioskiSummary.added,
+      addedTemplates: templatesSummary.added,
+      skippedDuplicates: wnioskiSummary.skippedDuplicates + templatesSummary.skippedDuplicates,
     };
   };
 
@@ -620,6 +664,16 @@ export default function App() {
         type: 'info',
         message: `Usunięto paczkę nauczyciela „${resolvePackageTeacherName(confirmDialog.pkg)}” i przeliczono sprawozdania klas.`,
       });
+    } else if (confirmDialog.kind === 'import_backup') {
+      if (backupDownloadFirst) {
+        exportStateAsJson(stateRef.current);
+      }
+      const next = confirmDialog.nextState;
+      setState(next);
+      setYearFilter('all');
+      setSelectedPrintIds([]);
+      setActiveTab('kreator');
+      void saveAppStateImmediate(next, { replaceAll: true });
     } else if (confirmDialog.kind === 'reset_all') {
       const fresh = createInitialAppState();
       setState(fresh);
@@ -634,84 +688,104 @@ export default function App() {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
 
-    const workingPackages = [...state.supervisionPackages];
-    const newDiffs: PackageDiffResult[] = [];
-    let addedCount = 0;
-    let unchangedCount = 0;
-    const errors: string[] = [];
+    const readResults = await Promise.all(
+      fileArray.map(async (file) => {
+        try {
+          const text = await file.text();
+          return { fileName: file.name, parsed: validateAndParseSupervisionPackageJson(text) };
+        } catch {
+          return {
+            fileName: file.name,
+            parsed: { ok: false as const, error: 'Nie udało się odczytać pliku.' },
+          };
+        }
+      })
+    );
 
-    const findExistingIndex = (incoming: TeacherSupervisionPackage): number => {
-      const byKey = workingPackages.findIndex((p) => p.teacherKey === incoming.teacherKey);
+    const findExistingIndex = (
+      packages: TeacherSupervisionPackage[],
+      incoming: TeacherSupervisionPackage
+    ): number => {
+      const byKey = packages.findIndex((p) => p.teacherKey === incoming.teacherKey);
       if (byKey !== -1) return byKey;
       const normName = resolvePackageTeacherName(incoming).trim().toLowerCase();
       if (!normName || normName.startsWith('nauczyciel (brak')) return -1;
       const normSchool = incoming.schoolName.trim().toLowerCase();
-      return workingPackages.findIndex((p) => {
+      return packages.findIndex((p) => {
         const pName = resolvePackageTeacherName(p).trim().toLowerCase();
         const pSchool = p.schoolName.trim().toLowerCase();
         return pName === normName && (!normSchool || !pSchool || pSchool === normSchool);
       });
     };
 
-    for (const file of fileArray) {
-      try {
-        const text = await file.text();
-        const parsed = validateAndParseSupervisionPackageJson(text);
-        if (!parsed.ok) {
-          errors.push(`${file.name}: ${parsed.error}`);
+    const mergeIncomingPackages = (basePackages: TeacherSupervisionPackage[]) => {
+      const working = [...basePackages];
+      const diffs: PackageDiffResult[] = [];
+      let added = 0;
+      let unchanged = 0;
+      const errors: string[] = [];
+
+      for (const item of readResults) {
+        if (!item.parsed.ok) {
+          errors.push(`${item.fileName}: ${item.parsed.error}`);
           continue;
         }
-        const incoming = parsed.pkg;
-        const existingIdx = findExistingIndex(incoming);
+        const incoming = item.parsed.pkg;
+        const existingIdx = findExistingIndex(working, incoming);
         if (existingIdx === -1) {
-          workingPackages.push(incoming);
-          addedCount += 1;
+          working.push(incoming);
+          added += 1;
         } else {
-          const existingPkg = workingPackages[existingIdx];
+          const existingPkg = working[existingIdx];
           const diff = diffSupervisionPackage(existingPkg, incoming);
           if (diff.hasAnyChanges) {
-            newDiffs.push(diff);
+            diffs.push(diff);
           } else {
-            workingPackages[existingIdx] = {
+            working[existingIdx] = {
               ...existingPkg,
               importedAt: new Date().toISOString(),
             };
-            unchangedCount += 1;
+            unchanged += 1;
           }
         }
-      } catch {
-        errors.push(`${file.name}: Nie udało się odczytać pliku.`);
       }
-    }
 
-    if (addedCount > 0 || unchangedCount > 0) {
+      return { working, diffs, added, unchanged, errors };
+    };
+
+    const summary = mergeIncomingPackages(stateRef.current.supervisionPackages);
+
+    if (summary.added > 0 || summary.unchanged > 0) {
       setState((prev) => ({
         ...prev,
-        supervisionPackages: workingPackages,
+        supervisionPackages: mergeIncomingPackages(prev.supervisionPackages).working,
       }));
     }
 
-    if (newDiffs.length > 0) {
-      setDiffQueue((prev) => {
-        const combined = [...prev, ...newDiffs];
-        setDiffQueueTotal(combined.length);
-        return combined;
-      });
+    if (summary.diffs.length > 0) {
+      const combined = [...diffQueueRef.current, ...summary.diffs];
+      setDiffQueue(combined);
+      setDiffQueueTotal(combined.length);
     }
 
-    if (errors.length > 0 && addedCount === 0 && newDiffs.length === 0 && unchangedCount === 0) {
+    if (
+      summary.errors.length > 0 &&
+      summary.added === 0 &&
+      summary.diffs.length === 0 &&
+      summary.unchanged === 0
+    ) {
       setSupervisionFeedback({
         type: 'error',
-        message: errors[0],
+        message: summary.errors[0],
       });
     } else {
       const parts: string[] = [];
-      if (addedCount > 0) parts.push(`dodano nowe paczki: ${addedCount}`);
-      if (newDiffs.length > 0) parts.push(`do porównania wersji: ${newDiffs.length}`);
-      if (unchangedCount > 0) parts.push(`bez zmian w treści: ${unchangedCount}`);
-      if (errors.length > 0) parts.push(`błędne pliki: ${errors.length}`);
+      if (summary.added > 0) parts.push(`dodano nowe paczki: ${summary.added}`);
+      if (summary.diffs.length > 0) parts.push(`do porównania wersji: ${summary.diffs.length}`);
+      if (summary.unchanged > 0) parts.push(`bez zmian w treści: ${summary.unchanged}`);
+      if (summary.errors.length > 0) parts.push(`błędne pliki: ${summary.errors.length}`);
       setSupervisionFeedback({
-        type: errors.length > 0 ? 'info' : 'success',
+        type: summary.errors.length > 0 ? 'info' : 'success',
         message: `Zakończono import plików (${parts.join(', ')}). Zestawienia klasowe zostały zaktualizowane.`,
       });
     }
@@ -875,6 +949,54 @@ export default function App() {
         hasDocuments={hasPrintableContent}
       />
 
+      {saveStatus === 'error' && (
+        <div
+          role="alert"
+          className="no-print border-b border-red-200 bg-red-50 px-4 md:px-6 py-2.5 text-xs text-red-900"
+        >
+          <div className="mx-auto max-w-[1440px] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>
+                Nie udało się zapisać zmian w przeglądarce. Pobierz kopię JSON, aby zabezpieczyć dane.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => exportStateAsJson(state)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Pobierz kopię JSON</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {hasExternalTabUpdate && (
+        <div
+          role="status"
+          className="no-print border-b border-amber-200 bg-amber-50 px-4 md:px-6 py-2.5 text-xs text-amber-950"
+        >
+          <div className="mx-auto max-w-[1440px] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>
+                Dane zostały zmienione w innej karcie. Odśwież stronę, aby uniknąć utraty zmian.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Odśwież</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Interactive Workspace (hidden when printing) */}
       <main className="flex-1 flex flex-col no-print">
         {isHydrating ? (
@@ -899,57 +1021,71 @@ export default function App() {
         )}
 
         {activeTab === 'baza_wnioskow' && (
-          <WnioskiDatabaseView
-            customWnioski={state.customWnioski}
-            customTemplates={state.customTemplates}
-            canInsertIntoActive={canInsertConclusionsToActive}
-            activeDocumentTitle={activeDoc?.title}
-            onInsertToActive={(text) => handleInsertConclusion(text, 'append')}
-            onAddCustomWniosek={handleAddCustomWniosek}
-            onDeleteCustomWniosek={handleDeleteCustomWniosek}
-            onAddCustomTemplate={handleAddCustomTemplate}
-            onUpdateCustomTemplate={handleUpdateCustomTemplate}
-            onDeleteCustomTemplate={handleDeleteCustomTemplate}
-            onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
-          />
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center p-10 text-sm text-slate-600">
+                Wczytywanie bazy wniosków…
+              </div>
+            }
+          >
+            <WnioskiDatabaseView
+              customWnioski={state.customWnioski}
+              customTemplates={state.customTemplates}
+              canInsertIntoActive={canInsertConclusionsToActive}
+              activeDocumentTitle={activeDoc?.title}
+              onInsertToActive={(text) => handleInsertConclusion(text, 'append')}
+              onAddCustomWniosek={handleAddCustomWniosek}
+              onDeleteCustomWniosek={handleDeleteCustomWniosek}
+              onAddCustomTemplate={handleAddCustomTemplate}
+              onUpdateCustomTemplate={handleUpdateCustomTemplate}
+              onDeleteCustomTemplate={handleDeleteCustomTemplate}
+              onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'nadzor' && (
-          <DirectorSupervisionView
-            packages={state.supervisionPackages}
-            reports={supervisionReports}
-            availableYears={availableSupervisionYears}
-            yearFilter={supervisionYearFilter}
-            semesterFilter={supervisionSemesterFilter}
-            selectedClassName={selectedSupervisionClass}
-            selectedPrintClasses={selectedPrintClasses}
-            importFeedback={supervisionFeedback}
-            onChangeYearFilter={handleChangeSupervisionYearFilter}
-            onChangeSemesterFilter={handleChangeSupervisionSemesterFilter}
-            onSelectClass={setSelectedSupervisionClass}
-            onTogglePrintClass={handleTogglePrintSupervisionClass}
-            onToggleSelectAllClasses={handleToggleSelectAllSupervisionClasses}
-            onClearPrintClasses={handleClearPrintSupervisionClasses}
-            onImportFiles={(files) => {
-              void handleImportSupervisionFiles(files);
-            }}
-            onUpdateClassNotes={handleUpdateSupervisionClassNotes}
-            onRequestDeletePackage={(pkg) =>
-              setConfirmDialog({ kind: 'delete_supervision_pkg', pkg })
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center p-10 text-sm text-slate-600">
+                Wczytywanie panelu nadzoru…
+              </div>
             }
-            onPrintClass={handlePrintSupervisionClass}
-            onGenerateBatchPdf={handlePrintAllSupervisionClasses}
-          />
+          >
+            <DirectorSupervisionView
+              packages={state.supervisionPackages}
+              reports={supervisionReports}
+              availableYears={availableSupervisionYears}
+              yearFilter={supervisionYearFilter}
+              semesterFilter={supervisionSemesterFilter}
+              selectedClassName={selectedSupervisionClass}
+              selectedPrintClasses={selectedPrintClasses}
+              importFeedback={supervisionFeedback}
+              onChangeYearFilter={handleChangeSupervisionYearFilter}
+              onChangeSemesterFilter={handleChangeSupervisionSemesterFilter}
+              onSelectClass={setSelectedSupervisionClass}
+              onTogglePrintClass={handleTogglePrintSupervisionClass}
+              onToggleSelectAllClasses={handleToggleSelectAllSupervisionClasses}
+              onClearPrintClasses={handleClearPrintSupervisionClasses}
+              onImportFiles={(files) => {
+                void handleImportSupervisionFiles(files);
+              }}
+              onUpdateClassNotes={handleUpdateSupervisionClassNotes}
+              onRequestDeletePackage={(pkg) =>
+                setConfirmDialog({ kind: 'delete_supervision_pkg', pkg })
+              }
+              onPrintClass={handlePrintSupervisionClass}
+              onGenerateBatchPdf={handlePrintAllSupervisionClasses}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'kopia_json' && (
           <BackupJsonView
             state={state}
             onImportState={(nextState) => {
-              setState(nextState);
-              setYearFilter('all');
-              setActiveTab('kreator');
-              void saveAppStateImmediate(nextState, { replaceAll: true });
+              setBackupDownloadFirst(true);
+              setConfirmDialog({ kind: 'import_backup', nextState });
             }}
             onRequestFullReset={() => setConfirmDialog({ kind: 'reset_all' })}
             onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
@@ -959,10 +1095,18 @@ export default function App() {
         )}
 
         {activeTab === 'o_programie' && (
-          <AboutView
-            activeSection={aboutSection}
-            onChangeSection={setAboutSection}
-          />
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center p-10 text-sm text-slate-600">
+                Wczytywanie informacji o programie…
+              </div>
+            }
+          >
+            <AboutView
+              activeSection={aboutSection}
+              onChangeSection={setAboutSection}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'kreator' && (
@@ -1004,7 +1148,7 @@ export default function App() {
             <div className="flex-1 flex flex-col min-w-0 bg-slate-50/40">
               {/* Workspace sub-toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 md:px-6 py-2.5">
-                <div className="flex items-center gap-3 text-xs text-slate-600">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   {!state.profile.fullName ? (
                     <button
                       type="button"
@@ -1017,14 +1161,18 @@ export default function App() {
                   ) : (
                     <span>
                       Profil: <strong className="text-slate-900">{state.profile.fullName}</strong>
-                      <span className="mx-1.5" aria-hidden="true">·</span>
-                      <span>
-                        {storageBackend === 'indexeddb'
-                          ? 'Zapisano w IndexedDB'
-                          : 'Tryb tymczasowy (IndexedDB zablokowane)'}
-                      </span>
                     </span>
                   )}
+                  <span className="text-slate-300" aria-hidden="true">·</span>
+                  <span className={saveStatus === 'error' ? 'font-semibold text-red-700' : ''}>
+                    {storageBackend !== 'indexeddb'
+                      ? 'Tryb tymczasowy (IndexedDB zablokowane)'
+                      : saveStatus === 'saving'
+                        ? 'Zapisywanie w IndexedDB…'
+                        : saveStatus === 'error'
+                          ? 'Błąd zapisu w IndexedDB'
+                          : 'Zapisano w IndexedDB'}
+                  </span>
                 </div>
 
                 {/* Layout mode segmented switcher + active document print */}
@@ -1399,6 +1547,7 @@ export default function App() {
 
       <ConfirmModal
         isOpen={!!confirmDialog}
+        destructive={confirmDialog?.kind !== 'import_backup'}
         title={
           confirmDialog?.kind === 'delete_doc'
             ? 'Usunąć ten dokument?'
@@ -1406,7 +1555,9 @@ export default function App() {
               ? 'Wyczyścić formularz tej karty?'
               : confirmDialog?.kind === 'delete_supervision_pkg'
                 ? 'Usunąć paczkę nauczyciela z nadzoru?'
-                : 'Wyczyścić wszystkie dane aplikacji?'
+                : confirmDialog?.kind === 'import_backup'
+                  ? 'Zastąpić bieżące dane kopią z pliku?'
+                  : 'Wyczyścić wszystkie dane aplikacji?'
         }
         description={
           confirmDialog?.kind === 'delete_doc'
@@ -1415,7 +1566,9 @@ export default function App() {
               ? 'Wszystkie wpisane w tej karcie odpowiedzi zostaną usunięte (dane z profilu pozostaną zachowane).'
               : confirmDialog?.kind === 'delete_supervision_pkg'
                 ? `Zaimportowana paczka nauczyciela „${resolvePackageTeacherName(confirmDialog.pkg)}” zostanie usunięta z panelu Nadzoru dyrektora, a sprawozdania zbiorcze klas zostaną automatycznie przeliczone.`
-                : 'Wszystkie dokumenty oraz ustawienia profilu zapisane w przeglądarce zostaną trwale usunięte. Zalecamy wcześniej pobrać kopię JSON.'
+                : confirmDialog?.kind === 'import_backup'
+                  ? 'Import pliku JSON trwale zastąpi wszystkie bieżące dokumenty, ustawienia profilu oraz własne wnioski i szablony zapisane w tej przeglądarce.'
+                  : 'Wszystkie dokumenty oraz ustawienia profilu zapisane w przeglądarce zostaną trwale usunięte. Zalecamy wcześniej pobrać kopię JSON.'
         }
         confirmLabel={
           confirmDialog?.kind === 'delete_doc'
@@ -1424,11 +1577,54 @@ export default function App() {
               ? 'Wyczyść kartę'
               : confirmDialog?.kind === 'delete_supervision_pkg'
                 ? 'Usuń paczkę'
-                : 'Wyczyść wszystko'
+                : confirmDialog?.kind === 'import_backup'
+                  ? 'Zastąp dane kopią'
+                  : 'Wyczyść wszystko'
         }
         onConfirm={handleConfirmAction}
         onCancel={() => setConfirmDialog(null)}
-      />
+      >
+        {confirmDialog?.kind === 'import_backup' && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+              <p>
+                Profil w pliku:{' '}
+                <strong className="text-slate-900">
+                  {confirmDialog.nextState.profile.fullName || 'Nie podano'}
+                </strong>
+              </p>
+              <p>
+                Dokumenty do wczytania:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {confirmDialog.nextState.documents.length}
+                </strong>
+              </p>
+              <p>
+                Własne wnioski / szablony:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {confirmDialog.nextState.customWnioski.length}
+                </strong>{' '}
+                /{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {confirmDialog.nextState.customTemplates.length}
+                </strong>
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={backupDownloadFirst}
+                onChange={(e) => setBackupDownloadFirst(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
+              />
+              <span>
+                <strong>Najpierw pobierz kopię bieżących danych</strong> (plik JSON z obecną sesją zostanie zapisany na dysku przed nadpisaniem)
+              </span>
+            </label>
+          </div>
+        )}
+      </ConfirmModal>
 
       <OfflineIndicator />
     </div>

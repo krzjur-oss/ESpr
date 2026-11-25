@@ -3,18 +3,40 @@ import {
   WNIOSKI_CATEGORY_OPTIONS,
 } from '../data/wnioskiDatabase';
 import {
+  AdditionalTaskRow,
   AppState,
+  ClassificationPeriod,
+  CurriculumStatus,
   CustomTemplateEntry,
   CustomWniosekEntry,
+  DocumentType,
+  EfektyNauczaniaDoc,
+  KartaInformacyjnaDoc,
+  NdstNextSemesterActionKey,
+  NdstObservationKey,
+  NdstTeacherActionKey,
+  PodsumowanieSpecjalistyDoc,
   ReportDocument,
+  SPECIALIST_ROLE_LABELS,
   SemesterType,
+  SpecialistRole,
   SubjectAssignment,
+  SubjectHoursRow,
   TEMPLATE_CATEGORY_LABELS,
   TeacherProfile,
   TeacherSupervisionPackage,
   TemplateSectionCategory,
+  UzasadnienieNdstDoc,
+  UzasadnienieNieklasyfikowaniaDoc,
+  ZbiorczeEfektyDoc,
+  ZbiorczeRow,
 } from '../types/reports';
-import { createDefaultProfile, createId, createInitialAppState } from './documentFactory';
+import {
+  createDefaultProfile,
+  createDocumentByType,
+  createId,
+  createInitialAppState,
+} from './documentFactory';
 import { buildTeacherKey } from './supervision';
 
 const VALID_WNIOSEK_CATEGORY_IDS = new Set<string>(
@@ -75,16 +97,364 @@ function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
     }));
 }
 
-function sanitizeDocuments(docs: ReportDocument[]): ReportDocument[] {
-  return docs.map((doc) => {
-    if (doc.type === 'efekty_nauczania') {
+const VALID_CURRICULUM_STATUSES = new Set<CurriculumStatus>([
+  'na_biezaco',
+  'opoznienie',
+  'wyprzedzenie',
+]);
+
+const VALID_SPECIALIST_ROLES = new Set<string>(Object.keys(SPECIALIST_ROLE_LABELS));
+
+function asStr(val: unknown, fallback: string): string {
+  return typeof val === 'string' ? val : fallback;
+}
+
+function asBool(val: unknown, fallback: boolean): boolean {
+  return typeof val === 'boolean' ? val : fallback;
+}
+
+function asSemester(val: unknown, fallback: SemesterType): SemesterType {
+  return val === 'I' || val === 'II' ? val : fallback;
+}
+
+function asCurriculumStatus(val: unknown, fallback: CurriculumStatus): CurriculumStatus {
+  return typeof val === 'string' && VALID_CURRICULUM_STATUSES.has(val as CurriculumStatus)
+    ? (val as CurriculumStatus)
+    : fallback;
+}
+
+function asClassificationPeriod(
+  val: unknown,
+  fallback: ClassificationPeriod
+): ClassificationPeriod {
+  return val === 'srodroczne' || val === 'roczne' ? val : fallback;
+}
+
+function asStringArray<T extends string>(val: unknown, fallback: T[]): T[] {
+  if (!Array.isArray(val)) return fallback;
+  return val.filter((item): item is T => typeof item === 'string' && item.trim().length > 0);
+}
+
+function sanitizeZbiorczeRows(raw: unknown, fallback: ZbiorczeRow[]): ZbiorczeRow[] {
+  if (!Array.isArray(raw)) return fallback;
+  const seenIds = new Set<string>();
+  return raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      if (seenIds.has(id)) id = createId();
+      seenIds.add(id);
       return {
-        ...doc,
-        textbookNumber: typeof doc.textbookNumber === 'string' ? doc.textbookNumber : '',
+        id,
+        className: asStr(item.className, ''),
+        teacherName: asStr(item.teacherName, ''),
+        curriculumStatus: asCurriculumStatus(item.curriculumStatus, 'na_biezaco'),
+        curriculumDetails: asStr(item.curriculumDetails, ''),
+        failingCount: asStr(item.failingCount, '0'),
+        excellentCount: asStr(item.excellentCount, '0'),
+        notes: asStr(item.notes, ''),
+      };
+    });
+}
+
+function sanitizeSubjectHoursRows(
+  raw: unknown,
+  fallback: SubjectHoursRow[]
+): SubjectHoursRow[] {
+  if (!Array.isArray(raw)) return fallback;
+  const seenIds = new Set<string>();
+  return raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      if (seenIds.has(id)) id = createId();
+      seenIds.add(id);
+      return {
+        id,
+        subject: asStr(item.subject, ''),
+        hours: asStr(item.hours, ''),
+      };
+    });
+}
+
+function sanitizeAdditionalTaskRows(
+  raw: unknown,
+  fallback: AdditionalTaskRow[]
+): AdditionalTaskRow[] {
+  if (!Array.isArray(raw)) return fallback;
+  const seenIds = new Set<string>();
+  return raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      if (seenIds.has(id)) id = createId();
+      seenIds.add(id);
+      return {
+        id,
+        taskType: asStr(item.taskType, ''),
+        results: asStr(item.results, ''),
+        conclusions: asStr(item.conclusions, ''),
+      };
+    });
+}
+
+function sanitizeSingleDocument(
+  raw: unknown,
+  fallbackProfile: TeacherProfile,
+  seenIds: Set<string>
+): ReportDocument | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.type !== 'string' || !VALID_DOC_TYPES.has(obj.type)) {
+    return null;
+  }
+
+  const docType = obj.type as DocumentType;
+  let id = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : createId();
+  if (seenIds.has(id)) {
+    id = createId();
+  }
+  seenIds.add(id);
+
+  const specialistRole: SpecialistRole =
+    typeof obj.role === 'string' && VALID_SPECIALIST_ROLES.has(obj.role)
+      ? (obj.role as SpecialistRole)
+      : 'pedagog_psycholog';
+  const coordinatorMode: 'przedmiotowy' | 'wczesnoszkolna' =
+    obj.mode === 'wczesnoszkolna' ? 'wczesnoszkolna' : 'przedmiotowy';
+  const classPeriod: ClassificationPeriod = asClassificationPeriod(
+    obj.classificationPeriod,
+    'srodroczne'
+  );
+
+  const base = createDocumentByType(docType, fallbackProfile, {
+    specialistRole,
+    coordinatorMode,
+    classificationPeriod: classPeriod,
+    schoolYear: typeof obj.schoolYear === 'string' ? obj.schoolYear : undefined,
+  });
+
+  const common = {
+    id,
+    title: asStr(obj.title, base.title),
+    createdAt: typeof obj.createdAt === 'string' && obj.createdAt.trim() ? obj.createdAt : base.createdAt,
+    updatedAt: typeof obj.updatedAt === 'string' && obj.updatedAt.trim() ? obj.updatedAt : base.updatedAt,
+    schoolName: asStr(obj.schoolName, base.schoolName),
+    schoolYear: asStr(obj.schoolYear, base.schoolYear),
+    signatureDate: asStr(obj.signatureDate, base.signatureDate),
+  };
+
+  switch (base.type) {
+    case 'efekty_nauczania': {
+      const def = base as EfektyNauczaniaDoc;
+      return {
+        ...def,
+        ...common,
+        type: 'efekty_nauczania',
+        semester: asSemester(obj.semester, def.semester),
+        teacherName: asStr(obj.teacherName, def.teacherName),
+        subject: asStr(obj.subject, def.subject),
+        programNumber: asStr(obj.programNumber, def.programNumber),
+        textbookNumber: asStr(obj.textbookNumber, def.textbookNumber),
+        textbookTitle: asStr(obj.textbookTitle, def.textbookTitle),
+        className: asStr(obj.className, def.className),
+        curriculumStatus: asCurriculumStatus(obj.curriculumStatus, def.curriculumStatus),
+        curriculumScope: asStr(obj.curriculumScope, def.curriculumScope),
+        curriculumNotes: asStr(obj.curriculumNotes, def.curriculumNotes),
+        failingGradesCount: asStr(obj.failingGradesCount, def.failingGradesCount),
+        excellentGradesCount: asStr(obj.excellentGradesCount, def.excellentGradesCount),
+        gradesNotes: asStr(obj.gradesNotes, def.gradesNotes),
+        individualPathNotApplicable: asBool(
+          obj.individualPathNotApplicable,
+          def.individualPathNotApplicable
+        ),
+        individualPathSummary: asStr(obj.individualPathSummary, def.individualPathSummary),
+        competitionsNone: asBool(obj.competitionsNone, def.competitionsNone),
+        competitionsDetails: asStr(obj.competitionsDetails, def.competitionsDetails),
+        educationalTrips: asStr(obj.educationalTrips, def.educationalTrips),
+        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: asStr(
+          obj.previousConclusionsStatus,
+          def.previousConclusionsStatus
+        ),
+        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
       };
     }
-    return doc;
-  });
+    case 'zbiorcze_efekty': {
+      const def = base as ZbiorczeEfektyDoc;
+      return {
+        ...def,
+        ...common,
+        type: 'zbiorcze_efekty',
+        semester: asSemester(obj.semester, def.semester),
+        coordinatorName: asStr(obj.coordinatorName, def.coordinatorName),
+        subjectOrStage: asStr(obj.subjectOrStage, def.subjectOrStage),
+        mode: coordinatorMode,
+        rows: sanitizeZbiorczeRows(obj.rows, def.rows),
+        earlyEdWeakAreas: asStr(obj.earlyEdWeakAreas, def.earlyEdWeakAreas),
+        earlyEdStrongAreas: asStr(obj.earlyEdStrongAreas, def.earlyEdStrongAreas),
+        achievements: asStr(obj.achievements, def.achievements),
+        educationalTrips: asStr(obj.educationalTrips, def.educationalTrips),
+        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: asStr(
+          obj.previousConclusionsStatus,
+          def.previousConclusionsStatus
+        ),
+        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
+      };
+    }
+    case 'karta_informacyjna': {
+      const def = base as KartaInformacyjnaDoc;
+      return {
+        ...def,
+        ...common,
+        type: 'karta_informacyjna',
+        teacherName: asStr(obj.teacherName, def.teacherName),
+        period: asStr(obj.period, def.period),
+        totalHours: asStr(obj.totalHours, def.totalHours),
+        homeroomClass: asStr(obj.homeroomClass, def.homeroomClass),
+        subjectHours: sanitizeSubjectHoursRows(obj.subjectHours, def.subjectHours),
+        qualificationsStudies: asStr(obj.qualificationsStudies, def.qualificationsStudies),
+        qualificationsWorkshops: asStr(
+          obj.qualificationsWorkshops,
+          def.qualificationsWorkshops
+        ),
+        qualificationsMethodical: asStr(
+          obj.qualificationsMethodical,
+          def.qualificationsMethodical
+        ),
+        studentAchievements: asStr(obj.studentAchievements, def.studentAchievements),
+        tripsOrganization: asStr(obj.tripsOrganization, def.tripsOrganization),
+        didacticBaseEnrichment: asStr(obj.didacticBaseEnrichment, def.didacticBaseEnrichment),
+        statutoryActivities: asStr(obj.statutoryActivities, def.statutoryActivities),
+        directorTasks: sanitizeAdditionalTaskRows(obj.directorTasks, def.directorTasks),
+        teacherInitiativeTasks: sanitizeAdditionalTaskRows(
+          obj.teacherInitiativeTasks,
+          def.teacherInitiativeTasks
+        ),
+      };
+    }
+    case 'podsumowanie_specjalisty': {
+      const def = base as PodsumowanieSpecjalistyDoc;
+      return {
+        ...def,
+        ...common,
+        type: 'podsumowanie_specjalisty',
+        semester: asSemester(obj.semester, def.semester),
+        role: specialistRole,
+        specialistName: asStr(obj.specialistName, def.specialistName),
+        studentInfo: asStr(obj.studentInfo, def.studentInfo),
+        plannedTasks: asStr(obj.plannedTasks, def.plannedTasks),
+        tasksRealization: asStr(obj.tasksRealization, def.tasksRealization),
+        effects: asStr(obj.effects, def.effects),
+        conclusions: asStr(obj.conclusions, def.conclusions),
+        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: asStr(
+          obj.previousConclusionsStatus,
+          def.previousConclusionsStatus
+        ),
+        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
+      };
+    }
+    case 'uzasadnienie_nieklasyfikowania': {
+      const def = base as UzasadnienieNieklasyfikowaniaDoc;
+      return {
+        ...def,
+        ...common,
+        type: 'uzasadnienie_nieklasyfikowania',
+        classificationPeriod: classPeriod,
+        attachmentNumber: asStr(obj.attachmentNumber, def.attachmentNumber),
+        studentName: asStr(obj.studentName, def.studentName),
+        className: asStr(obj.className, def.className),
+        subject: asStr(obj.subject, def.subject),
+        teacherName: asStr(obj.teacherName, def.teacherName),
+        absencePercent: asStr(obj.absencePercent, def.absencePercent),
+        additionalJustification: asStr(
+          obj.additionalJustification,
+          def.additionalJustification
+        ),
+      };
+    }
+    case 'uzasadnienie_ndst': {
+      const def = base as UzasadnienieNdstDoc;
+      const completed =
+        obj.additionalTasksCompleted === 'TAK' || obj.additionalTasksCompleted === 'NIE'
+          ? obj.additionalTasksCompleted
+          : '';
+      const attended =
+        obj.remedialClassesAttended === 'TAK' ||
+        obj.remedialClassesAttended === 'NIE' ||
+        obj.remedialClassesAttended === 'RZADKO'
+          ? obj.remedialClassesAttended
+          : '';
+      return {
+        ...def,
+        ...common,
+        type: 'uzasadnienie_ndst',
+        classificationPeriod: classPeriod,
+        attachmentNumber: asStr(obj.attachmentNumber, def.attachmentNumber),
+        studentName: asStr(obj.studentName, def.studentName),
+        className: asStr(obj.className, def.className),
+        subject: asStr(obj.subject, def.subject),
+        teacherName: asStr(obj.teacherName, def.teacherName),
+        educationStage: asStr(obj.educationStage, def.educationStage),
+        curriculumGaps: asStr(obj.curriculumGaps, def.curriculumGaps),
+        observations: asStringArray<NdstObservationKey>(obj.observations, def.observations),
+        teacherActions: asStringArray<NdstTeacherActionKey>(
+          obj.teacherActions,
+          def.teacherActions
+        ),
+        improvementScheduleWhen: asStr(
+          obj.improvementScheduleWhen,
+          def.improvementScheduleWhen
+        ),
+        improvementScheduleForm: asStr(
+          obj.improvementScheduleForm,
+          def.improvementScheduleForm
+        ),
+        additionalTasksExamples: asStr(
+          obj.additionalTasksExamples,
+          def.additionalTasksExamples
+        ),
+        additionalTasksCompleted: completed,
+        remedialClassesWhat: asStr(obj.remedialClassesWhat, def.remedialClassesWhat),
+        remedialClassesAttended: attended,
+        remedialClassesNotAttendedReason: asStr(
+          obj.remedialClassesNotAttendedReason,
+          def.remedialClassesNotAttendedReason
+        ),
+        parentsNotifiedDate: asStr(obj.parentsNotifiedDate, def.parentsNotifiedDate),
+        parentsInstructedDate: asStr(obj.parentsInstructedDate, def.parentsInstructedDate),
+        pedagogueNotifiedDate: asStr(obj.pedagogueNotifiedDate, def.pedagogueNotifiedDate),
+        otherTeacherActionsText: asStr(
+          obj.otherTeacherActionsText,
+          def.otherTeacherActionsText
+        ),
+        parentsCooperation: asStr(obj.parentsCooperation, def.parentsCooperation),
+        nextSemesterActions: asStringArray<NdstNextSemesterActionKey>(
+          obj.nextSemesterActions,
+          def.nextSemesterActions
+        ),
+        nextSemesterOtherText: asStr(obj.nextSemesterOtherText, def.nextSemesterOtherText),
+      };
+    }
+  }
+}
+
+function sanitizeDocuments(
+  docs: unknown,
+  fallbackProfile: TeacherProfile = createDefaultProfile()
+): ReportDocument[] {
+  if (!Array.isArray(docs)) return [];
+  const seenIds = new Set<string>();
+  const result: ReportDocument[] = [];
+  for (const rawDoc of docs) {
+    const sanitized = sanitizeSingleDocument(rawDoc, fallbackProfile, seenIds);
+    if (sanitized) {
+      result.push(sanitized);
+    }
+  }
+  return result;
 }
 
 function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
@@ -92,6 +462,17 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
   const subjectsList = Array.isArray(raw.subjectsList)
     ? raw.subjectsList.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
     : defaults.subjectsList;
+
+  const classesList = Array.isArray(raw.classesList)
+    ? Array.from(
+        new Set(
+          raw.classesList
+            .filter((c): c is string => typeof c === 'string')
+            .map((c) => c.trim())
+            .filter((c) => c.length > 0)
+        )
+      )
+    : defaults.classesList;
 
   let subjectAssignments: SubjectAssignment[];
   if (Array.isArray(raw.subjectAssignments)) {
@@ -142,7 +523,7 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
         : defaults.periodPreset,
     periodText: typeof raw.periodText === 'string' ? raw.periodText : defaults.periodText,
     homeroomClass: typeof raw.homeroomClass === 'string' ? raw.homeroomClass : defaults.homeroomClass,
-    classesList: Array.isArray(raw.classesList) ? raw.classesList : defaults.classesList,
+    classesList,
     subjectsList: derivedSubjectsList,
     subjectAssignments,
     signatureDate: typeof raw.signatureDate === 'string' ? raw.signatureDate : defaults.signatureDate,
@@ -159,14 +540,9 @@ const VALID_DOC_TYPES = new Set([
 ]);
 
 function isValidReportDocument(doc: unknown): doc is ReportDocument {
-  if (!doc || typeof doc !== 'object') return false;
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
   const candidate = doc as Partial<ReportDocument>;
-  return (
-    typeof candidate.id === 'string' &&
-    candidate.id.trim().length > 0 &&
-    typeof candidate.type === 'string' &&
-    VALID_DOC_TYPES.has(candidate.type)
-  );
+  return typeof candidate.type === 'string' && VALID_DOC_TYPES.has(candidate.type);
 }
 
 function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] {
@@ -180,7 +556,7 @@ function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] 
           : {}
       );
       const validDocs = Array.isArray(item.documents)
-        ? sanitizeDocuments(item.documents.filter(isValidReportDocument))
+        ? sanitizeDocuments(item.documents.filter(isValidReportDocument), profile)
         : [];
       const teacherKey =
         typeof item.teacherKey === 'string' && item.teacherKey.trim()
@@ -246,17 +622,89 @@ const STORE_TEMPLATES = 'customTemplates';
 const STORE_SUPERVISION_PACKAGES = 'supervisionPackages';
 
 export type StorageBackend = 'indexeddb' | 'memory';
+export type SaveStatus = 'saved' | 'saving' | 'error';
 
 interface MetaRecord<T = unknown> {
   key: string;
   value: T;
 }
 
+const BROADCAST_CHANNEL_NAME = 'esprawozdania';
+const TAB_INSTANCE_ID = createId();
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 let lastPersistedState: AppState | null = null;
 let writeQueue: Promise<boolean> = Promise.resolve(true);
 let debounceTimer: number | null = null;
 let pendingStateToSave: AppState | null = null;
+let currentSaveStatus: SaveStatus = 'saved';
+const saveStatusListeners = new Set<(status: SaveStatus) => void>();
+const crossTabListeners = new Set<() => void>();
+let sharedBroadcastChannel: BroadcastChannel | null = null;
+
+function setSaveStatus(next: SaveStatus): void {
+  if (currentSaveStatus === next) return;
+  currentSaveStatus = next;
+  for (const listener of saveStatusListeners) {
+    listener(next);
+  }
+}
+
+export function getSaveStatus(): SaveStatus {
+  return currentSaveStatus;
+}
+
+export function subscribeSaveStatus(listener: (status: SaveStatus) => void): () => void {
+  saveStatusListeners.add(listener);
+  listener(currentSaveStatus);
+  return () => {
+    saveStatusListeners.delete(listener);
+  };
+}
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') {
+    return null;
+  }
+  if (!sharedBroadcastChannel) {
+    try {
+      sharedBroadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      sharedBroadcastChannel.onmessage = (event: MessageEvent) => {
+        const data = event.data as { type?: string; tabId?: string } | null;
+        if (data?.type === 'state_saved' && data.tabId && data.tabId !== TAB_INSTANCE_ID) {
+          for (const listener of crossTabListeners) {
+            listener();
+          }
+        }
+      };
+    } catch {
+      return null;
+    }
+  }
+  return sharedBroadcastChannel;
+}
+
+function notifyOtherTabsSaved(): void {
+  const ch = getBroadcastChannel();
+  if (!ch) return;
+  try {
+    ch.postMessage({
+      type: 'state_saved',
+      tabId: TAB_INSTANCE_ID,
+      timestamp: Date.now(),
+    });
+  } catch {
+    // Ignore closed channel or unsupported structured clone errors
+  }
+}
+
+export function subscribeCrossTabChanges(listener: () => void): () => void {
+  getBroadcastChannel();
+  crossTabListeners.add(listener);
+  return () => {
+    crossTabListeners.delete(listener);
+  };
+}
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -365,15 +813,17 @@ function readLegacyLocalStorage(): AppState | null {
     if (!parsed || typeof parsed !== 'object' || !parsed.profile || !Array.isArray(parsed.documents)) {
       return null;
     }
+    const profile = sanitizeProfile(parsed.profile);
+    const documents = sanitizeDocuments(parsed.documents, profile);
     const activeId =
-      parsed.activeDocumentId && parsed.documents.some((d) => d.id === parsed.activeDocumentId)
+      parsed.activeDocumentId && documents.some((d) => d.id === parsed.activeDocumentId)
         ? parsed.activeDocumentId
-        : parsed.documents[0]?.id ?? null;
+        : documents[0]?.id ?? null;
 
     return {
       version: parsed.version ?? 1,
-      profile: sanitizeProfile(parsed.profile),
-      documents: sanitizeDocuments(parsed.documents),
+      profile,
+      documents,
       activeDocumentId: activeId,
       customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
       customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
@@ -599,7 +1049,12 @@ export async function loadAppState(): Promise<{
       rawPackages.length > 0;
 
     if (hasExistingDbData) {
-      const orderedDocs = sanitizeDocuments(reorderByIds(rawDocs, metaMap.get('documentOrder')));
+      const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
+      const profile = sanitizeProfile(rawProfile ?? {});
+      const orderedDocs = sanitizeDocuments(
+        reorderByIds(rawDocs, metaMap.get('documentOrder')),
+        profile
+      );
       const orderedWnioski = sanitizeCustomWnioski(
         reorderByIds(rawWnioski, metaMap.get('customWnioskiOrder'))
       );
@@ -609,7 +1064,6 @@ export async function loadAppState(): Promise<{
       const orderedPackages = sanitizeSupervisionPackages(
         reorderByIds(rawPackages, metaMap.get('supervisionPackageOrder'))
       );
-      const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
       const rawActiveId = metaMap.get('activeDocumentId');
       const activeDocumentId =
         typeof rawActiveId === 'string' && orderedDocs.some((d) => d.id === rawActiveId)
@@ -618,7 +1072,7 @@ export async function loadAppState(): Promise<{
 
       const hydrated: AppState = {
         version: typeof metaMap.get('version') === 'number' ? (metaMap.get('version') as number) : 1,
-        profile: sanitizeProfile(rawProfile ?? {}),
+        profile,
         documents: orderedDocs,
         activeDocumentId,
         customWnioski: orderedWnioski,
@@ -642,6 +1096,7 @@ export async function loadAppState(): Promise<{
     return { state: initialState, backend: 'indexeddb' };
   } catch {
     // Graceful fallback if IndexedDB is blocked in a restricted browser environment
+    setSaveStatus('error');
     const legacy = readLegacyLocalStorage();
     return {
       state: legacy ?? createInitialAppState(),
@@ -659,14 +1114,28 @@ export function saveAppStateImmediate(
     debounceTimer = null;
   }
   pendingStateToSave = null;
+  setSaveStatus('saving');
 
-  const task = writeQueue.then(() => writeStateToDb(state, options));
-  writeQueue = task.catch(() => false);
+  const task = writeQueue.then(async () => {
+    const ok = await writeStateToDb(state, options);
+    if (ok) {
+      setSaveStatus('saved');
+      notifyOtherTabsSaved();
+    } else {
+      setSaveStatus('error');
+    }
+    return ok;
+  });
+  writeQueue = task.catch(() => {
+    setSaveStatus('error');
+    return false;
+  });
   return task;
 }
 
 export function scheduleSaveAppState(state: AppState, delayMs = 250): void {
   pendingStateToSave = state;
+  setSaveStatus('saving');
   if (debounceTimer !== null) {
     window.clearTimeout(debounceTimer);
   }
@@ -696,6 +1165,30 @@ export async function resetAllStoredState(freshState: AppState): Promise<void> {
   clearLegacyLocalStorage();
   lastPersistedState = null;
   await saveAppStateImmediate(freshState, { replaceAll: true });
+}
+
+export async function exportRawIndexedDbBackup(): Promise<boolean> {
+  try {
+    const { state } = await loadAppState();
+    exportStateAsJson(state);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function wipeDatabaseForRecovery(): Promise<void> {
+  clearLegacyLocalStorage();
+  lastPersistedState = null;
+  dbPromise = null;
+  if (typeof window !== 'undefined' && 'indexedDB' in window && window.indexedDB) {
+    await new Promise<void>((resolve) => {
+      const req = window.indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
+  }
 }
 
 export function exportStateAsJson(state: AppState): void {
@@ -735,32 +1228,24 @@ export function validateAndParseImportedJson(jsonText: string): {
       return { ok: false, error: 'Brak listy dokumentów (documents) w pliku.' };
     }
 
-    const validTypes = new Set([
-      'efekty_nauczania',
-      'zbiorcze_efekty',
-      'karta_informacyjna',
-      'podsumowanie_specjalisty',
-      'uzasadnienie_nieklasyfikowania',
-      'uzasadnienie_ndst',
-    ]);
-
-    for (const doc of data.documents) {
-      if (!doc || typeof doc !== 'object' || !doc.id || !validTypes.has(doc.type)) {
-        return { ok: false, error: 'Jeden z dokumentów w pliku ma nieobsługiwany lub uszkodzony format.' };
-      }
+    const validRawDocs = data.documents.filter(isValidReportDocument);
+    if (data.documents.length > 0 && validRawDocs.length === 0) {
+      return { ok: false, error: 'Żaden z dokumentów w pliku nie ma prawidłowego typu dokumentu.' };
     }
 
+    const profile = sanitizeProfile(data.profile);
+    const sanitizedDocuments = sanitizeDocuments(validRawDocs, profile);
     const activeDocumentId =
-      data.activeDocumentId && data.documents.some((d) => d.id === data.activeDocumentId)
+      data.activeDocumentId && sanitizedDocuments.some((d) => d.id === data.activeDocumentId)
         ? data.activeDocumentId
-        : data.documents[0]?.id ?? null;
+        : sanitizedDocuments[0]?.id ?? null;
 
     return {
       ok: true,
       state: {
-        version: data.version ?? 1,
-        profile: sanitizeProfile(data.profile),
-        documents: sanitizeDocuments(data.documents),
+        version: typeof data.version === 'number' ? data.version : 1,
+        profile,
+        documents: sanitizedDocuments,
         activeDocumentId,
         customWnioski: sanitizeCustomWnioski(data.customWnioski),
         customTemplates: sanitizeCustomTemplates(data.customTemplates),
@@ -812,7 +1297,8 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       return { ok: false, error: 'Plik nie zawiera listy sprawozdań (documents).' };
     }
 
-    const validDocs = sanitizeDocuments(raw.documents.filter(isValidReportDocument));
+    const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>);
+    const validDocs = sanitizeDocuments(raw.documents.filter(isValidReportDocument), profile);
     if (validDocs.length === 0) {
       return {
         ok: false,
@@ -820,7 +1306,6 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       };
     }
 
-    const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>);
     const teacherKey =
       typeof raw.teacherKey === 'string' && raw.teacherKey.trim()
         ? raw.teacherKey.trim()

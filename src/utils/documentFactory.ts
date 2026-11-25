@@ -174,17 +174,43 @@ export function findSubjectAssignment(
   return bestScore >= 0 ? bestItem : undefined;
 }
 
-export function createDefaultProfile(): TeacherProfile {
+export interface DefaultSchoolYearInfo {
+  schoolYear: string;
+  defaultSemester: SemesterType;
+  periodPreset: 'sem1' | 'sem2';
+  periodText: string;
+}
+
+export function getDefaultSchoolYearInfo(date: Date = new Date()): DefaultSchoolYearInfo {
+  const year = date.getFullYear();
+  const month = date.getMonth(); // 0 = styczeń, 8 = wrzesień
+
+  const startYear = month >= 8 ? year : year - 1;
+  const endYear = startYear + 1;
+  const isFirstSemester = month >= 8 || month === 0; // wrzesień–styczeń
+
+  return {
+    schoolYear: `${startYear}/${endYear}`,
+    defaultSemester: isFirstSemester ? 'I' : 'II',
+    periodPreset: isFirstSemester ? 'sem1' : 'sem2',
+    periodText: isFirstSemester
+      ? `01.09.${startYear} – 31.01.${endYear}`
+      : `01.02.${endYear} – 30.06.${endYear}`,
+  };
+}
+
+export function createDefaultProfile(date: Date = new Date()): TeacherProfile {
+  const yearInfo = getDefaultSchoolYearInfo(date);
   return {
     senderId: createId(),
     fullName: '',
     schoolName: '',
-    schoolYear: '2025/2026',
-    defaultSemester: 'II',
-    periodPreset: 'sem2',
-    periodText: '01.02.2026 – 26.06.2026',
+    schoolYear: yearInfo.schoolYear,
+    defaultSemester: yearInfo.defaultSemester,
+    periodPreset: yearInfo.periodPreset,
+    periodText: yearInfo.periodText,
     homeroomClass: '',
-    classesList: ['4A', '5B'],
+    classesList: [],
     subjectsList: ['Matematyka'],
     subjectAssignments: [
       {

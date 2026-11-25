@@ -53,6 +53,7 @@ Szczegółowe warunki licencyjne określa plik `LICENSE.md`. W sprawach zgody na
 3. Administratorem danych wprowadzanych do programu (w tym ewentualnych danych osobowych zawartych w treści sprawozdań) jest wyłącznie Użytkownik końcowy lub placówka oświatowa — Autor nie ma jakiegokolwiek technicznego dostępu do tych danych.
 4. Aplikacja nie używa plików cookie, narzędzi analitycznych ani reklamowych systemów śledzenia. Mechanizm PWA (Service Worker) zapisuje w pamięci podręcznej przeglądarki wyłącznie statyczne pliki samej aplikacji, umożliwiając jej działanie bez dostępu do internetu (100% offline).
 5. Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy `IndexedDB` za pomocą funkcji **„Wyczyść wszystkie dane”** w zakładce **Kopia JSON** albo czyszcząc dane witryny w przeglądarce.
+6. Wyeksportowane pliki kopii JSON oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
 
 ---
 

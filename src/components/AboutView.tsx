@@ -459,6 +459,9 @@ export const AboutView: React.FC<AboutViewProps> = ({
               <li>
                 Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy IndexedDB w zakładce <strong>Kopia JSON</strong> albo czyszcząc dane witryny w przeglądarce.
               </li>
+              <li>
+                Wyeksportowane pliki kopii JSON oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
+              </li>
             </ol>
           </section>
 

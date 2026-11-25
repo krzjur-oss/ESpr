@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
 interface ConfirmModalProps {
@@ -8,6 +8,7 @@ interface ConfirmModalProps {
   confirmLabel: string;
   cancelLabel?: string;
   destructive?: boolean;
+  children?: React.ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,9 +20,23 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   confirmLabel,
   cancelLabel = 'Anuluj',
   destructive = true,
+  children,
   onConfirm,
   onCancel,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
 
   return (
@@ -52,6 +67,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         </div>
 
         <p className="mt-3 text-sm text-slate-600 leading-relaxed">{description}</p>
+
+        {children && <div className="mt-4">{children}</div>}
 
         <div className="mt-6 flex items-center justify-end gap-3">
           <button
