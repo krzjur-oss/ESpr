@@ -13,7 +13,12 @@ import { AboutSection, AboutView } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
+import {
+  DirectorSupervisionView,
+  SupervisionImportFeedback,
+} from './components/DirectorSupervisionView';
 import { DocumentSidebar, DocumentSortOption } from './components/DocumentSidebar';
+import { ExportSupervisionModal } from './components/ExportSupervisionModal';
 import { NewYearRolloverModal } from './components/NewYearRolloverModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ProfileView } from './components/ProfileView';
@@ -24,6 +29,7 @@ import {
   SharePhrasesModal,
   SharePhrasesModalMode,
 } from './components/SharePhrasesModal';
+import { SupervisionDiffModal } from './components/SupervisionDiffModal';
 import { TemplatePickerModal } from './components/TemplatePickerModal';
 import { TopBar } from './components/TopBar';
 import { WnioskiDatabaseView } from './components/WnioskiDatabaseView';
@@ -33,6 +39,7 @@ import { PodsumowanieSpecjalistyForm } from './components/forms/PodsumowanieSpec
 import { UzasadnienieNdstForm } from './components/forms/UzasadnienieNdstForm';
 import { UzasadnienieNieklasyfikowaniaForm } from './components/forms/UzasadnienieNieklasyfikowaniaForm';
 import { ZbiorczeEfektyForm } from './components/forms/ZbiorczeEfektyForm';
+import { ClassCollectivePrintSheet } from './components/print/ClassCollectivePrintSheet';
 import { PrintDocumentRenderer } from './components/print/PrintDocumentRenderer';
 import {
   OpenSaveTemplateParams,
@@ -53,6 +60,7 @@ import {
   SemesterType,
   SpecialistRole,
   TeacherProfile,
+  TeacherSupervisionPackage,
   TemplateSectionCategory,
 } from './types/reports';
 import {
@@ -74,7 +82,17 @@ import {
   saveAppStateImmediate,
   scheduleSaveAppState,
   StorageBackend,
+  validateAndParseSupervisionPackageJson,
 } from './utils/storage';
+import {
+  ClassCollectiveReport,
+  PackageDiffResult,
+  aggregateClassCollectiveReports,
+  applySupervisionDiffDecisions,
+  diffSupervisionPackage,
+  getAvailableSupervisionYears,
+  resolvePackageTeacherName,
+} from './utils/supervision';
 
 type EditorLayoutMode = 'split' | 'editor' | 'preview';
 
@@ -100,12 +118,27 @@ export default function App() {
     useState<OpenSaveTemplateParams | null>(null);
   const [sharePhrasesModalMode, setSharePhrasesModalMode] =
     useState<SharePhrasesModalMode | null>(null);
+  const [exportSupervisionOpen, setExportSupervisionOpen] = useState(false);
+  const [diffQueue, setDiffQueue] = useState<PackageDiffResult[]>([]);
+  const [diffQueueTotal, setDiffQueueTotal] = useState(0);
+  const [supervisionYearFilter, setSupervisionYearFilter] = useState<string>('all');
+  const [supervisionSemesterFilter, setSupervisionSemesterFilter] = useState<'all' | SemesterType>(
+    'all'
+  );
+  const [selectedSupervisionClass, setSelectedSupervisionClass] = useState<string | null>(null);
+  const [selectedPrintClasses, setSelectedPrintClasses] = useState<string[]>([]);
+  const [supervisionFeedback, setSupervisionFeedback] =
+    useState<SupervisionImportFeedback | null>(null);
 
   const [printOverrideDocs, setPrintOverrideDocs] = useState<ReportDocument[] | null>(null);
+  const [printSupervisionReports, setPrintSupervisionReports] = useState<
+    ClassCollectiveReport[] | null
+  >(null);
 
   const [confirmDialog, setConfirmDialog] = useState<
     | { kind: 'delete_doc'; doc: ReportDocument }
     | { kind: 'reset_doc'; doc: ReportDocument }
+    | { kind: 'delete_supervision_pkg'; pkg: TeacherSupervisionPackage }
     | { kind: 'reset_all' }
     | null
   >(null);
@@ -245,6 +278,36 @@ export default function App() {
     if (printMode === 'all') return batchDocuments;
     return activeDoc ? [activeDoc] : [];
   }, [printMode, batchDocuments, activeDoc]);
+
+  const availableSupervisionYears = useMemo(
+    () => getAvailableSupervisionYears(state.supervisionPackages),
+    [state.supervisionPackages]
+  );
+
+  const supervisionReports = useMemo(
+    () =>
+      aggregateClassCollectiveReports(
+        state.supervisionPackages,
+        state.supervisionClassNotes,
+        {
+          schoolYear: supervisionYearFilter,
+          semester: supervisionSemesterFilter,
+        }
+      ),
+    [
+      state.supervisionPackages,
+      state.supervisionClassNotes,
+      supervisionYearFilter,
+      supervisionSemesterFilter,
+    ]
+  );
+
+  const supervisionBatchReports = useMemo(() => {
+    if (selectedPrintClasses.length === 0) return supervisionReports;
+    const pickedSet = new Set(selectedPrintClasses);
+    const filtered = supervisionReports.filter((r) => pickedSet.has(r.className));
+    return filtered.length > 0 ? filtered : supervisionReports;
+  }, [supervisionReports, selectedPrintClasses]);
 
   const updateProfile = (profile: TeacherProfile) => {
     setState((prev) => ({ ...prev, profile }));
@@ -547,6 +610,16 @@ export default function App() {
     } else if (confirmDialog.kind === 'reset_doc') {
       const cleared = clearDocumentFields(confirmDialog.doc, state.profile);
       handleUpdateDocument(cleared);
+    } else if (confirmDialog.kind === 'delete_supervision_pkg') {
+      const targetId = confirmDialog.pkg.id;
+      setState((prev) => ({
+        ...prev,
+        supervisionPackages: prev.supervisionPackages.filter((p) => p.id !== targetId),
+      }));
+      setSupervisionFeedback({
+        type: 'info',
+        message: `Usunięto paczkę nauczyciela „${resolvePackageTeacherName(confirmDialog.pkg)}” i przeliczono sprawozdania klas.`,
+      });
     } else if (confirmDialog.kind === 'reset_all') {
       const fresh = createInitialAppState();
       setState(fresh);
@@ -557,9 +630,189 @@ export default function App() {
     setConfirmDialog(null);
   };
 
+  const handleImportSupervisionFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    const workingPackages = [...state.supervisionPackages];
+    const newDiffs: PackageDiffResult[] = [];
+    let addedCount = 0;
+    let unchangedCount = 0;
+    const errors: string[] = [];
+
+    const findExistingIndex = (incoming: TeacherSupervisionPackage): number => {
+      const byKey = workingPackages.findIndex((p) => p.teacherKey === incoming.teacherKey);
+      if (byKey !== -1) return byKey;
+      const normName = resolvePackageTeacherName(incoming).trim().toLowerCase();
+      if (!normName || normName.startsWith('nauczyciel (brak')) return -1;
+      const normSchool = incoming.schoolName.trim().toLowerCase();
+      return workingPackages.findIndex((p) => {
+        const pName = resolvePackageTeacherName(p).trim().toLowerCase();
+        const pSchool = p.schoolName.trim().toLowerCase();
+        return pName === normName && (!normSchool || !pSchool || pSchool === normSchool);
+      });
+    };
+
+    for (const file of fileArray) {
+      try {
+        const text = await file.text();
+        const parsed = validateAndParseSupervisionPackageJson(text);
+        if (!parsed.ok) {
+          errors.push(`${file.name}: ${parsed.error}`);
+          continue;
+        }
+        const incoming = parsed.pkg;
+        const existingIdx = findExistingIndex(incoming);
+        if (existingIdx === -1) {
+          workingPackages.push(incoming);
+          addedCount += 1;
+        } else {
+          const existingPkg = workingPackages[existingIdx];
+          const diff = diffSupervisionPackage(existingPkg, incoming);
+          if (diff.hasAnyChanges) {
+            newDiffs.push(diff);
+          } else {
+            workingPackages[existingIdx] = {
+              ...existingPkg,
+              importedAt: new Date().toISOString(),
+            };
+            unchangedCount += 1;
+          }
+        }
+      } catch {
+        errors.push(`${file.name}: Nie udało się odczytać pliku.`);
+      }
+    }
+
+    if (addedCount > 0 || unchangedCount > 0) {
+      setState((prev) => ({
+        ...prev,
+        supervisionPackages: workingPackages,
+      }));
+    }
+
+    if (newDiffs.length > 0) {
+      setDiffQueue((prev) => {
+        const combined = [...prev, ...newDiffs];
+        setDiffQueueTotal(combined.length);
+        return combined;
+      });
+    }
+
+    if (errors.length > 0 && addedCount === 0 && newDiffs.length === 0 && unchangedCount === 0) {
+      setSupervisionFeedback({
+        type: 'error',
+        message: errors[0],
+      });
+    } else {
+      const parts: string[] = [];
+      if (addedCount > 0) parts.push(`dodano nowe paczki: ${addedCount}`);
+      if (newDiffs.length > 0) parts.push(`do porównania wersji: ${newDiffs.length}`);
+      if (unchangedCount > 0) parts.push(`bez zmian w treści: ${unchangedCount}`);
+      if (errors.length > 0) parts.push(`błędne pliki: ${errors.length}`);
+      setSupervisionFeedback({
+        type: errors.length > 0 ? 'info' : 'success',
+        message: `Zakończono import plików (${parts.join(', ')}). Zestawienia klasowe zostały zaktualizowane.`,
+      });
+    }
+  };
+
+  const handleResolveSupervisionDiff = (decisions: Record<string, 'incoming' | 'existing'>) => {
+    const currentDiff = diffQueue[0];
+    if (!currentDiff) return;
+    const mergedPkg = applySupervisionDiffDecisions(currentDiff, decisions);
+    setState((prev) => ({
+      ...prev,
+      supervisionPackages: prev.supervisionPackages.map((p) =>
+        p.id === mergedPkg.id ? mergedPkg : p
+      ),
+    }));
+    setDiffQueue((prev) => prev.slice(1));
+    setSupervisionFeedback({
+      type: 'success',
+      message: `Zastosowano wybrane zmiany dla nauczyciela „${resolvePackageTeacherName(mergedPkg)}” i przeliczono klasy.`,
+    });
+  };
+
+  const handleSkipSupervisionDiff = () => {
+    setDiffQueue((prev) => prev.slice(1));
+  };
+
+  const handleUpdateSupervisionClassNotes = (notesKey: string, notes: string) => {
+    setState((prev) => ({
+      ...prev,
+      supervisionClassNotes: {
+        ...prev.supervisionClassNotes,
+        [notesKey]: notes,
+      },
+    }));
+  };
+
+  const handleTogglePrintSupervisionClass = (className: string) => {
+    setSelectedPrintClasses((prev) =>
+      prev.includes(className)
+        ? prev.filter((item) => item !== className)
+        : [...prev, className]
+    );
+  };
+
+  const handleToggleSelectAllSupervisionClasses = () => {
+    if (supervisionReports.length === 0) return;
+    setSelectedPrintClasses(supervisionReports.map((r) => r.className));
+  };
+
+  const handleClearPrintSupervisionClasses = () => {
+    setSelectedPrintClasses([]);
+  };
+
+  const handleChangeSupervisionYearFilter = (nextYear: string) => {
+    setSupervisionYearFilter(nextYear);
+    setSelectedPrintClasses([]);
+  };
+
+  const handleChangeSupervisionSemesterFilter = (nextSemester: 'all' | SemesterType) => {
+    setSupervisionSemesterFilter(nextSemester);
+    setSelectedPrintClasses([]);
+  };
+
+  const handlePrintSupervisionClass = (report: ClassCollectiveReport) => {
+    flushSync(() => {
+      setPrintOverrideDocs(null);
+      setPrintSupervisionReports([report]);
+    });
+    const yearSuffix = supervisionYearFilter !== 'all' ? ` (${supervisionYearFilter})` : '';
+    triggerWindowPrint(
+      `Zbiorcze sprawozdanie - Klasa ${report.className}${yearSuffix}`,
+      () => {
+        setPrintSupervisionReports(null);
+      }
+    );
+  };
+
+  const handlePrintAllSupervisionClasses = () => {
+    if (supervisionBatchReports.length === 0) return;
+    flushSync(() => {
+      setPrintOverrideDocs(null);
+      setPrintSupervisionReports(supervisionBatchReports);
+    });
+    const yearSuffix =
+      supervisionYearFilter !== 'all' ? ` - Rok ${supervisionYearFilter}` : '';
+    const classesSummary =
+      selectedPrintClasses.length > 0 && supervisionBatchReports.length <= 5
+        ? ` [${supervisionBatchReports.map((r) => r.className).join(', ')}]`
+        : '';
+    triggerWindowPrint(
+      `Zbiorcze sprawozdania klas${yearSuffix}${classesSummary} (${supervisionBatchReports.length})`,
+      () => {
+        setPrintSupervisionReports(null);
+      }
+    );
+  };
+
   const handlePrintActiveDocument = () => {
     if (!activeDoc) return;
     flushSync(() => {
+      setPrintSupervisionReports(null);
       setPrintOverrideDocs([activeDoc]);
     });
     triggerWindowPrint(activeDoc.title || 'Sprawozdanie szkolne', () => {
@@ -571,6 +824,7 @@ export default function App() {
     if (batchDocuments.length === 0) return;
     const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
     flushSync(() => {
+      setPrintSupervisionReports(null);
       setPrintOverrideDocs(batchDocuments);
     });
     triggerWindowPrint(
@@ -582,6 +836,10 @@ export default function App() {
   };
 
   const handlePrint = () => {
+    if (activeTab === 'nadzor') {
+      handlePrintAllSupervisionClasses();
+      return;
+    }
     if (docsToPrint.length === 0) return;
     if (printMode === 'active' && activeDoc) {
       handlePrintActiveDocument();
@@ -589,6 +847,7 @@ export default function App() {
     }
     const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
     flushSync(() => {
+      setPrintSupervisionReports(null);
       setPrintOverrideDocs(null);
     });
     triggerWindowPrint(
@@ -604,13 +863,16 @@ export default function App() {
       activeDoc.type === 'zbiorcze_efekty' ||
       activeDoc.type === 'podsumowanie_specjalisty');
 
+  const hasPrintableContent =
+    activeTab === 'nadzor' ? supervisionReports.length > 0 : docsToPrint.length > 0;
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       <TopBar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
         onPrint={handlePrint}
-        hasDocuments={docsToPrint.length > 0}
+        hasDocuments={hasPrintableContent}
       />
 
       {/* Main Interactive Workspace (hidden when printing) */}
@@ -652,6 +914,34 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'nadzor' && (
+          <DirectorSupervisionView
+            packages={state.supervisionPackages}
+            reports={supervisionReports}
+            availableYears={availableSupervisionYears}
+            yearFilter={supervisionYearFilter}
+            semesterFilter={supervisionSemesterFilter}
+            selectedClassName={selectedSupervisionClass}
+            selectedPrintClasses={selectedPrintClasses}
+            importFeedback={supervisionFeedback}
+            onChangeYearFilter={handleChangeSupervisionYearFilter}
+            onChangeSemesterFilter={handleChangeSupervisionSemesterFilter}
+            onSelectClass={setSelectedSupervisionClass}
+            onTogglePrintClass={handleTogglePrintSupervisionClass}
+            onToggleSelectAllClasses={handleToggleSelectAllSupervisionClasses}
+            onClearPrintClasses={handleClearPrintSupervisionClasses}
+            onImportFiles={(files) => {
+              void handleImportSupervisionFiles(files);
+            }}
+            onUpdateClassNotes={handleUpdateSupervisionClassNotes}
+            onRequestDeletePackage={(pkg) =>
+              setConfirmDialog({ kind: 'delete_supervision_pkg', pkg })
+            }
+            onPrintClass={handlePrintSupervisionClass}
+            onGenerateBatchPdf={handlePrintAllSupervisionClasses}
+          />
+        )}
+
         {activeTab === 'kopia_json' && (
           <BackupJsonView
             state={state}
@@ -663,6 +953,8 @@ export default function App() {
             }}
             onRequestFullReset={() => setConfirmDialog({ kind: 'reset_all' })}
             onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
+            onOpenSupervisionExport={() => setExportSupervisionOpen(true)}
+            onGoToSupervision={() => setActiveTab('nadzor')}
           />
         )}
 
@@ -705,6 +997,7 @@ export default function App() {
                 setConfirmDialog({ kind: 'delete_doc', doc })
               }
               onOpenNewYearModal={() => setRolloverOpen(true)}
+              onOpenSupervisionExport={() => setExportSupervisionOpen(true)}
             />
 
             {/* Editor + Live Print Preview Workspace */}
@@ -1015,13 +1308,21 @@ export default function App() {
 
       {/* Dedicated print-only container using loaded styles & @media print */}
       <div id="print-area" className="hidden print:block print-only-root">
-        {renderedPrintDocs.map((doc, index) => (
-          <PrintDocumentRenderer
-            key={doc.id}
-            doc={doc}
-            isLast={index === renderedPrintDocs.length - 1}
-          />
-        ))}
+        {printSupervisionReports !== null
+          ? printSupervisionReports.map((report, index) => (
+              <ClassCollectivePrintSheet
+                key={`${report.notesKey}:${index}`}
+                report={report}
+                isLast={index === printSupervisionReports.length - 1}
+              />
+            ))
+          : renderedPrintDocs.map((doc, index) => (
+              <PrintDocumentRenderer
+                key={doc.id}
+                doc={doc}
+                isLast={index === renderedPrintDocs.length - 1}
+              />
+            ))}
       </div>
 
       {/* Modals & Offline Banner */}
@@ -1065,6 +1366,26 @@ export default function App() {
         onImportPhrases={handleImportPhrases}
       />
 
+      <ExportSupervisionModal
+        isOpen={exportSupervisionOpen}
+        profile={state.profile}
+        documents={state.documents}
+        availableYears={availableYears}
+        defaultYearFilter={yearFilter}
+        onClose={() => setExportSupervisionOpen(false)}
+        onUpdateProfileName={(fullName) =>
+          updateProfile({ ...state.profile, fullName })
+        }
+      />
+
+      <SupervisionDiffModal
+        diff={diffQueue[0] ?? null}
+        queueIndex={Math.max(0, diffQueueTotal - diffQueue.length)}
+        queueTotal={diffQueueTotal}
+        onResolve={handleResolveSupervisionDiff}
+        onSkip={handleSkipSupervisionDiff}
+      />
+
       <NewYearRolloverModal
         isOpen={rolloverOpen}
         documents={state.documents}
@@ -1083,21 +1404,27 @@ export default function App() {
             ? 'Usunąć ten dokument?'
             : confirmDialog?.kind === 'reset_doc'
               ? 'Wyczyścić formularz tej karty?'
-              : 'Wyczyścić wszystkie dane aplikacji?'
+              : confirmDialog?.kind === 'delete_supervision_pkg'
+                ? 'Usunąć paczkę nauczyciela z nadzoru?'
+                : 'Wyczyścić wszystkie dane aplikacji?'
         }
         description={
           confirmDialog?.kind === 'delete_doc'
             ? `Dokument „${confirmDialog.doc.title}” zostanie trwale usunięty z bieżącej sesji.`
             : confirmDialog?.kind === 'reset_doc'
               ? 'Wszystkie wpisane w tej karcie odpowiedzi zostaną usunięte (dane z profilu pozostaną zachowane).'
-              : 'Wszystkie dokumenty oraz ustawienia profilu zapisane w przeglądarce zostaną trwale usunięte. Zalecamy wcześniej pobrać kopię JSON.'
+              : confirmDialog?.kind === 'delete_supervision_pkg'
+                ? `Zaimportowana paczka nauczyciela „${resolvePackageTeacherName(confirmDialog.pkg)}” zostanie usunięta z panelu Nadzoru dyrektora, a sprawozdania zbiorcze klas zostaną automatycznie przeliczone.`
+                : 'Wszystkie dokumenty oraz ustawienia profilu zapisane w przeglądarce zostaną trwale usunięte. Zalecamy wcześniej pobrać kopię JSON.'
         }
         confirmLabel={
           confirmDialog?.kind === 'delete_doc'
             ? 'Usuń dokument'
             : confirmDialog?.kind === 'reset_doc'
               ? 'Wyczyść kartę'
-              : 'Wyczyść wszystko'
+              : confirmDialog?.kind === 'delete_supervision_pkg'
+                ? 'Usuń paczkę'
+                : 'Wyczyść wszystko'
         }
         onConfirm={handleConfirmAction}
         onCancel={() => setConfirmDialog(null)}

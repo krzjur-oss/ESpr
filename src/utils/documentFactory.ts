@@ -176,6 +176,7 @@ export function findSubjectAssignment(
 
 export function createDefaultProfile(): TeacherProfile {
   return {
+    senderId: createId(),
     fullName: '',
     schoolName: '',
     schoolYear: '2025/2026',
@@ -746,5 +747,7 @@ export function createInitialAppState(): AppState {
     activeDocumentId: starterDoc.id,
     customWnioski: [],
     customTemplates: [],
+    supervisionPackages: [],
+    supervisionClassNotes: {},
   };
 }

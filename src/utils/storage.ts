@@ -7,12 +7,15 @@ import {
   CustomTemplateEntry,
   CustomWniosekEntry,
   ReportDocument,
+  SemesterType,
   SubjectAssignment,
   TEMPLATE_CATEGORY_LABELS,
   TeacherProfile,
+  TeacherSupervisionPackage,
   TemplateSectionCategory,
 } from '../types/reports';
 import { createDefaultProfile, createId, createInitialAppState } from './documentFactory';
+import { buildTeacherKey } from './supervision';
 
 const VALID_WNIOSEK_CATEGORY_IDS = new Set<string>(
   WNIOSKI_CATEGORY_OPTIONS.map((opt) => opt.id)
@@ -125,6 +128,10 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
       : subjectsList;
 
   return {
+    senderId:
+      typeof raw.senderId === 'string' && raw.senderId.trim()
+        ? raw.senderId.trim()
+        : defaults.senderId,
     fullName: typeof raw.fullName === 'string' ? raw.fullName : defaults.fullName,
     schoolName: typeof raw.schoolName === 'string' ? raw.schoolName : defaults.schoolName,
     schoolYear: typeof raw.schoolYear === 'string' ? raw.schoolYear : defaults.schoolYear,
@@ -142,13 +149,101 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
   };
 }
 
+const VALID_DOC_TYPES = new Set([
+  'efekty_nauczania',
+  'zbiorcze_efekty',
+  'karta_informacyjna',
+  'podsumowanie_specjalisty',
+  'uzasadnienie_nieklasyfikowania',
+  'uzasadnienie_ndst',
+]);
+
+function isValidReportDocument(doc: unknown): doc is ReportDocument {
+  if (!doc || typeof doc !== 'object') return false;
+  const candidate = doc as Partial<ReportDocument>;
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.type === 'string' &&
+    VALID_DOC_TYPES.has(candidate.type)
+  );
+}
+
+function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Partial<TeacherSupervisionPackage> => !!item && typeof item === 'object')
+    .map((item) => {
+      const profile = sanitizeProfile(
+        item.teacherProfileSnapshot && typeof item.teacherProfileSnapshot === 'object'
+          ? item.teacherProfileSnapshot
+          : {}
+      );
+      const validDocs = Array.isArray(item.documents)
+        ? sanitizeDocuments(item.documents.filter(isValidReportDocument))
+        : [];
+      const teacherKey =
+        typeof item.teacherKey === 'string' && item.teacherKey.trim()
+          ? item.teacherKey.trim()
+          : buildTeacherKey(profile, validDocs);
+
+      return {
+        id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
+        teacherKey,
+        teacherName:
+          typeof item.teacherName === 'string' && item.teacherName.trim()
+            ? item.teacherName.trim()
+            : profile.fullName,
+        schoolName:
+          typeof item.schoolName === 'string' && item.schoolName.trim()
+            ? item.schoolName.trim()
+            : profile.schoolName,
+        homeroomClass:
+          typeof item.homeroomClass === 'string'
+            ? item.homeroomClass
+            : profile.homeroomClass,
+        exportedAt:
+          typeof item.exportedAt === 'string' && item.exportedAt.trim()
+            ? item.exportedAt
+            : new Date().toISOString(),
+        importedAt:
+          typeof item.importedAt === 'string' && item.importedAt.trim()
+            ? item.importedAt
+            : new Date().toISOString(),
+        schoolYearFilter:
+          typeof item.schoolYearFilter === 'string' && item.schoolYearFilter.trim()
+            ? item.schoolYearFilter
+            : 'all',
+        semesterFilter:
+          item.semesterFilter === 'I' || item.semesterFilter === 'II'
+            ? item.semesterFilter
+            : ('all' as const),
+        teacherProfileSnapshot: profile,
+        documents: validDocs,
+      };
+    })
+    .filter((pkg) => pkg.documents.length > 0);
+}
+
+function sanitizeSupervisionClassNotes(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof key === 'string' && typeof val === 'string' && val.trim().length > 0) {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
 const DB_NAME = 'esprawozdania_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_META = 'meta';
 const STORE_DOCUMENTS = 'documents';
 const STORE_WNIOSKI = 'customWnioski';
 const STORE_TEMPLATES = 'customTemplates';
+const STORE_SUPERVISION_PACKAGES = 'supervisionPackages';
 
 export type StorageBackend = 'indexeddb' | 'memory';
 
@@ -230,6 +325,9 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_TEMPLATES)) {
         db.createObjectStore(STORE_TEMPLATES, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains(STORE_SUPERVISION_PACKAGES)) {
+        db.createObjectStore(STORE_SUPERVISION_PACKAGES, { keyPath: 'id' });
+      }
     };
 
     request.onsuccess = () => {
@@ -279,6 +377,8 @@ function readLegacyLocalStorage(): AppState | null {
       activeDocumentId: activeId,
       customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
       customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
+      supervisionPackages: sanitizeSupervisionPackages(parsed.supervisionPackages),
+      supervisionClassNotes: sanitizeSupervisionClassNotes(parsed.supervisionClassNotes),
     };
   } catch {
     return null;
@@ -308,13 +408,20 @@ async function writeStateToDb(
     const prev = replaceAll ? null : lastPersistedState;
 
     const tx = db.transaction(
-      [STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI, STORE_TEMPLATES],
+      [
+        STORE_META,
+        STORE_DOCUMENTS,
+        STORE_WNIOSKI,
+        STORE_TEMPLATES,
+        STORE_SUPERVISION_PACKAGES,
+      ],
       'readwrite'
     );
     const metaStore = tx.objectStore(STORE_META);
     const docStore = tx.objectStore(STORE_DOCUMENTS);
     const wnioskiStore = tx.objectStore(STORE_WNIOSKI);
     const templatesStore = tx.objectStore(STORE_TEMPLATES);
+    const supervisionStore = tx.objectStore(STORE_SUPERVISION_PACKAGES);
 
     // 1. Update metadata keys only when needed
     if (!prev) {
@@ -325,6 +432,11 @@ async function writeStateToDb(
       metaStore.put({ key: 'documentOrder', value: state.documents.map((d) => d.id) });
       metaStore.put({ key: 'customWnioskiOrder', value: state.customWnioski.map((w) => w.id) });
       metaStore.put({ key: 'customTemplatesOrder', value: state.customTemplates.map((t) => t.id) });
+      metaStore.put({
+        key: 'supervisionPackageOrder',
+        value: state.supervisionPackages.map((p) => p.id),
+      });
+      metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
     } else {
       if (prev.version !== state.version) {
         metaStore.put({ key: 'version', value: state.version });
@@ -349,6 +461,14 @@ async function writeStateToDb(
       const nextTemplatesOrder = state.customTemplates.map((t) => t.id);
       if (!arraysEqual(prevTemplatesOrder, nextTemplatesOrder)) {
         metaStore.put({ key: 'customTemplatesOrder', value: nextTemplatesOrder });
+      }
+      const prevPkgOrder = prev.supervisionPackages.map((p) => p.id);
+      const nextPkgOrder = state.supervisionPackages.map((p) => p.id);
+      if (!arraysEqual(prevPkgOrder, nextPkgOrder)) {
+        metaStore.put({ key: 'supervisionPackageOrder', value: nextPkgOrder });
+      }
+      if (prev.supervisionClassNotes !== state.supervisionClassNotes) {
+        metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
       }
     }
 
@@ -415,6 +535,27 @@ async function writeStateToDb(
       }
     }
 
+    // 5. Sync supervisionPackages store incrementally (or full replace)
+    if (!prev) {
+      supervisionStore.clear();
+      for (const pkg of state.supervisionPackages) {
+        supervisionStore.put(pkg);
+      }
+    } else if (prev.supervisionPackages !== state.supervisionPackages) {
+      const prevMap = new Map(prev.supervisionPackages.map((p) => [p.id, p]));
+      const nextIds = new Set(state.supervisionPackages.map((p) => p.id));
+      for (const oldId of prevMap.keys()) {
+        if (!nextIds.has(oldId)) {
+          supervisionStore.delete(oldId);
+        }
+      }
+      for (const pkg of state.supervisionPackages) {
+        if (prevMap.get(pkg.id) !== pkg) {
+          supervisionStore.put(pkg);
+        }
+      }
+    }
+
     await txDone(tx);
     lastPersistedState = state;
     return true;
@@ -430,14 +571,23 @@ export async function loadAppState(): Promise<{
   try {
     const db = await openDatabase();
     const tx = db.transaction(
-      [STORE_META, STORE_DOCUMENTS, STORE_WNIOSKI, STORE_TEMPLATES],
+      [
+        STORE_META,
+        STORE_DOCUMENTS,
+        STORE_WNIOSKI,
+        STORE_TEMPLATES,
+        STORE_SUPERVISION_PACKAGES,
+      ],
       'readonly'
     );
-    const [metaRecords, rawDocs, rawWnioski, rawTemplates] = await Promise.all([
+    const [metaRecords, rawDocs, rawWnioski, rawTemplates, rawPackages] = await Promise.all([
       reqToPromise<MetaRecord[]>(tx.objectStore(STORE_META).getAll()),
       reqToPromise<AppState['documents']>(tx.objectStore(STORE_DOCUMENTS).getAll()),
       reqToPromise<CustomWniosekEntry[]>(tx.objectStore(STORE_WNIOSKI).getAll()),
       reqToPromise<CustomTemplateEntry[]>(tx.objectStore(STORE_TEMPLATES).getAll()),
+      reqToPromise<TeacherSupervisionPackage[]>(
+        tx.objectStore(STORE_SUPERVISION_PACKAGES).getAll()
+      ),
     ]);
     await txDone(tx);
 
@@ -445,7 +595,8 @@ export async function loadAppState(): Promise<{
     const hasExistingDbData =
       metaMap.get('initialized') === true ||
       metaMap.has('profile') ||
-      rawDocs.length > 0;
+      rawDocs.length > 0 ||
+      rawPackages.length > 0;
 
     if (hasExistingDbData) {
       const orderedDocs = sanitizeDocuments(reorderByIds(rawDocs, metaMap.get('documentOrder')));
@@ -454,6 +605,9 @@ export async function loadAppState(): Promise<{
       );
       const orderedTemplates = sanitizeCustomTemplates(
         reorderByIds(rawTemplates, metaMap.get('customTemplatesOrder'))
+      );
+      const orderedPackages = sanitizeSupervisionPackages(
+        reorderByIds(rawPackages, metaMap.get('supervisionPackageOrder'))
       );
       const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
       const rawActiveId = metaMap.get('activeDocumentId');
@@ -469,6 +623,10 @@ export async function loadAppState(): Promise<{
         activeDocumentId,
         customWnioski: orderedWnioski,
         customTemplates: orderedTemplates,
+        supervisionPackages: orderedPackages,
+        supervisionClassNotes: sanitizeSupervisionClassNotes(
+          metaMap.get('supervisionClassNotes')
+        ),
       };
 
       lastPersistedState = hydrated;
@@ -606,10 +764,114 @@ export function validateAndParseImportedJson(jsonText: string): {
         activeDocumentId,
         customWnioski: sanitizeCustomWnioski(data.customWnioski),
         customTemplates: sanitizeCustomTemplates(data.customTemplates),
+        supervisionPackages: sanitizeSupervisionPackages(data.supervisionPackages),
+        supervisionClassNotes: sanitizeSupervisionClassNotes(data.supervisionClassNotes),
       },
     };
   } catch {
     return { ok: false, error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.' };
+  }
+}
+
+export function validateAndParseSupervisionPackageJson(jsonText: string):
+  | {
+      ok: true;
+      pkg: TeacherSupervisionPackage;
+      sourceKind: 'supervision_package' | 'full_backup';
+    }
+  | {
+      ok: false;
+      error: string;
+    } {
+  try {
+    const raw = JSON.parse(jsonText) as Record<string, unknown>;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { ok: false, error: 'Wybrany plik nie zawiera prawidłowego obiektu JSON.' };
+    }
+
+    if (raw.kind === 'phrases_bundle') {
+      return {
+        ok: false,
+        error:
+          'To jest plik bazy wniosków i szablonów, a nie paczka sprawozdań nauczyciela do nadzoru.',
+      };
+    }
+
+    const isDedicated = raw.kind === 'supervision_package';
+    const rawProfile = isDedicated ? raw.teacherProfileSnapshot : raw.profile;
+
+    if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+      return {
+        ok: false,
+        error:
+          'Plik nie zawiera podpisu profilu nauczyciela. Poproś nauczyciela o eksport paczki dla dyrektora lub pełnej kopii JSON.',
+      };
+    }
+
+    if (!Array.isArray(raw.documents)) {
+      return { ok: false, error: 'Plik nie zawiera listy sprawozdań (documents).' };
+    }
+
+    const validDocs = sanitizeDocuments(raw.documents.filter(isValidReportDocument));
+    if (validDocs.length === 0) {
+      return {
+        ok: false,
+        error: 'Wskazany plik nie zawiera żadnych poprawnych kart sprawozdań.',
+      };
+    }
+
+    const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>);
+    const teacherKey =
+      typeof raw.teacherKey === 'string' && raw.teacherKey.trim()
+        ? raw.teacherKey.trim()
+        : buildTeacherKey(profile, validDocs);
+
+    const teacherName =
+      profile.fullName.trim() ||
+      validDocs
+        .map((d) =>
+          'teacherName' in d
+            ? d.teacherName
+            : 'specialistName' in d
+              ? d.specialistName
+              : d.coordinatorName
+        )
+        .find((n) => n && n.trim().length > 0) ||
+      '';
+
+    const semesterFilter: 'all' | SemesterType =
+      raw.semesterFilter === 'I' || raw.semesterFilter === 'II' ? raw.semesterFilter : 'all';
+
+    const pkg: TeacherSupervisionPackage = {
+      id: typeof raw.packageId === 'string' && raw.packageId.trim() ? raw.packageId.trim() : createId(),
+      teacherKey,
+      teacherName: teacherName.trim(),
+      schoolName: profile.schoolName.trim(),
+      homeroomClass: profile.homeroomClass.trim(),
+      exportedAt:
+        typeof raw.exportedAt === 'string' && raw.exportedAt.trim()
+          ? raw.exportedAt
+          : new Date().toISOString(),
+      importedAt: new Date().toISOString(),
+      schoolYearFilter:
+        typeof raw.schoolYearFilter === 'string' && raw.schoolYearFilter.trim()
+          ? raw.schoolYearFilter
+          : 'all',
+      semesterFilter,
+      teacherProfileSnapshot: profile,
+      documents: validDocs,
+    };
+
+    return {
+      ok: true,
+      pkg,
+      sourceKind: isDedicated ? 'supervision_package' : 'full_backup',
+    };
+  } catch {
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
   }
 }
 

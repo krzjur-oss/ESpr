@@ -30,6 +30,7 @@ export interface SubjectAssignment {
 }
 
 export interface TeacherProfile {
+  senderId?: string;
   fullName: string;
   schoolName: string;
   schoolYear: string;
@@ -272,7 +273,13 @@ export type ReportDocument =
   | UzasadnienieNieklasyfikowaniaDoc
   | UzasadnienieNdstDoc;
 
-export type MainTab = 'kreator' | 'profil' | 'baza_wnioskow' | 'kopia_json' | 'o_programie';
+export type MainTab =
+  | 'kreator'
+  | 'profil'
+  | 'baza_wnioskow'
+  | 'nadzor'
+  | 'kopia_json'
+  | 'o_programie';
 
 export interface CustomWniosekEntry {
   id: string;
@@ -310,6 +317,20 @@ export const TEMPLATE_CATEGORY_LABELS: Record<TemplateSectionCategory, string> =
   wnioski_ewaluacja: 'Wnioski i ewaluacja z ubiegłego roku',
 };
 
+export interface TeacherSupervisionPackage {
+  id: string;
+  teacherKey: string;
+  teacherName: string;
+  schoolName: string;
+  homeroomClass: string;
+  exportedAt: string;
+  importedAt: string;
+  schoolYearFilter: string;
+  semesterFilter: 'all' | SemesterType;
+  teacherProfileSnapshot: TeacherProfile;
+  documents: ReportDocument[];
+}
+
 export interface AppState {
   version: number;
   profile: TeacherProfile;
@@ -317,6 +338,8 @@ export interface AppState {
   activeDocumentId: string | null;
   customWnioski: CustomWniosekEntry[];
   customTemplates: CustomTemplateEntry[];
+  supervisionPackages: TeacherSupervisionPackage[];
+  supervisionClassNotes: Record<string, string>;
 }
 
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {

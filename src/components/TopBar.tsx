@@ -14,6 +14,7 @@ const NAV_ITEMS: { id: MainTab; label: string }[] = [
   { id: 'kreator', label: 'Kreator' },
   { id: 'profil', label: 'Profil' },
   { id: 'baza_wnioskow', label: 'Wnioski i szablony' },
+  { id: 'nadzor', label: 'Nadzór dyrektora' },
   { id: 'kopia_json', label: 'Kopia JSON' },
   { id: 'o_programie', label: 'O programie' },
 ];
@@ -26,7 +27,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm no-print">
-      <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4 md:gap-8 px-4 md:px-6 h-14">
+      <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4 md:gap-6 px-4 md:px-6 h-14">
         {/* Zone 1: Single-element brand wordmark */}
         <button
           type="button"
@@ -36,10 +37,10 @@ export const TopBar: React.FC<TopBarProps> = ({
           E-Sprawozdania
         </button>
 
-        {/* Zone 2: 4 single-line navigation links */}
+        {/* Zone 2: Single-line navigation links */}
         <nav
           aria-label="Nawigacja główna"
-          className="hidden md:flex items-center gap-6 text-sm font-medium"
+          className="hidden md:flex items-center gap-4 lg:gap-6 text-sm font-medium"
         >
           {NAV_ITEMS.map((item) => {
             const isActive = activeTab === item.id;

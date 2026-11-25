@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, Share2, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, FolderKanban, Share2, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { AppState } from '../types/reports';
 import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storage';
 
@@ -8,6 +8,8 @@ interface BackupJsonViewProps {
   onImportState: (nextState: AppState) => void;
   onRequestFullReset: () => void;
   onOpenShareModal: (mode: 'export' | 'import') => void;
+  onOpenSupervisionExport: () => void;
+  onGoToSupervision: () => void;
 }
 
 export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
@@ -15,6 +17,8 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
   onImportState,
   onRequestFullReset,
   onOpenShareModal,
+  onOpenSupervisionExport,
+  onGoToSupervision,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -153,6 +157,40 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
           </div>
         </section>
       </div>
+
+      {/* Supervision package export & Director panel shortcut */}
+      <section className="mt-8 rounded-xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-blue-900 shrink-0" />
+            <h2 className="text-base font-semibold text-slate-900">
+              Paczka sprawozdań dla dyrektora (Nadzór pedagogiczny)
+            </h2>
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Wyeksportuj karty wybranego roku lub semestru podpisane Twoim profilem nauczyciela, aby dyrektor mógł automatycznie wygenerować sprawozdania zbiorcze klas ({state.supervisionPackages.length} paczek w nadzorze).
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            disabled={state.documents.length === 0}
+            onClick={onOpenSupervisionExport}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Eksportuj paczkę dla dyrektora</span>
+          </button>
+          <button
+            type="button"
+            onClick={onGoToSupervision}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <FolderKanban className="w-3.5 h-3.5 text-blue-900" />
+            <span>Przejdź do Nadzoru dyrektora</span>
+          </button>
+        </div>
+      </section>
 
       {/* Share / Transfer only Wnioski & Szablony */}
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">

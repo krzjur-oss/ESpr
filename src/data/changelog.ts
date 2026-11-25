@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.6';
+export const APP_VERSION = '1.7';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.7',
+    date: '25.11.2026',
+    title: 'Nadzór dyrektora i zaawansowane wyszukiwanie wniosków',
+    summary:
+      'Dodano eksport podpisanych paczek sprawozdań przez nauczycieli, panel Nadzoru dyrektora z automatycznymi sprawozdaniami zbiorczymi dla każdej klasy oraz wyszukiwanie pełnotekstowe w bazie wniosków.',
+    changes: [
+      'Dodano eksport podpisanej profilem nauczyciela paczki sprawozdań do nadzoru (z wyborem roku, semestru i kart).',
+      'Dodano panel „Nadzór dyrektora” z wielokrotnym importem paczek nauczycieli, wykrywaniem poprawek oraz interaktywnym porównaniem zmian przed aktualizacją.',
+      'Wprowadzono automatyczne budowanie i aktualizowanie jednego sprawozdania zbiorczego dla każdej klasy (przedmioty, realizacja podstawy, oceny ndst/celujące, NKL/NDST, wychowawstwo i wnioski) z gotowym wydrukiem A4.',
+      'Rozbudowano wyszukiwanie w bazie wniosków oraz w oknie wstawiania wniosków o przeszukiwanie treści i tytułów, obsługę wielu słów, dokładnych fraz, ignorowanie polskich znaków oraz podświetlanie dopasowań.',
+    ],
+  },
   {
     version: '1.6',
     date: '25.11.2026',

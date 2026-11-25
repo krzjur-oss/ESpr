@@ -6,6 +6,7 @@ import {
   FileText,
   Printer,
   Search,
+  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react';
@@ -53,6 +54,7 @@ interface DocumentSidebarProps {
   onDuplicateDocument: (id: string) => void;
   onRequestDeleteDocument: (doc: ReportDocument) => void;
   onOpenNewYearModal: () => void;
+  onOpenSupervisionExport: () => void;
 }
 
 export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
@@ -81,6 +83,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onDuplicateDocument,
   onRequestDeleteDocument,
   onOpenNewYearModal,
+  onOpenSupervisionExport,
 }) => {
   const [showNewMenu, setShowNewMenu] = useState(false);
   const selectedIdSet = useMemo(() => new Set(selectedPrintIds), [selectedPrintIds]);
@@ -202,14 +205,24 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
         </button>
 
         {documents.length > 0 && (
-          <button
-            type="button"
-            onClick={onOpenNewYearModal}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
-          >
-            <CalendarArrowUp className="w-3.5 h-3.5 text-blue-900 shrink-0" />
-            <span>Przenieś karty na nowy rok</span>
-          </button>
+          <div className="space-y-1.5">
+            <button
+              type="button"
+              onClick={onOpenNewYearModal}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              <CalendarArrowUp className="w-3.5 h-3.5 text-blue-900 shrink-0" />
+              <span>Przenieś karty na nowy rok</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenSupervisionExport}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-900 shrink-0" />
+              <span>Wyślij paczkę do dyrektora</span>
+            </button>
+          </div>
         )}
 
         {showNewMenu && (
