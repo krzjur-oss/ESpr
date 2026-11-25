@@ -50,9 +50,13 @@ function normalizeWithIndexMap(
   const indexMap: number[] = [];
 
   for (let i = 0; i < input.length; i++) {
-    const mapped = mapChar(input[i], ignoreDiacritics);
+    const ch = input[i];
+    if (ch === undefined) continue;
+    const mapped = mapChar(ch, ignoreDiacritics);
     for (let j = 0; j < mapped.length; j++) {
-      normalized += mapped[j];
+      const mappedChar = mapped[j];
+      if (mappedChar === undefined) continue;
+      normalized += mappedChar;
       indexMap.push(i);
     }
   }
@@ -63,7 +67,10 @@ function normalizeWithIndexMap(
 export function normalizeSearchText(input: string, ignoreDiacritics = true): string {
   let out = '';
   for (let i = 0; i < input.length; i++) {
-    out += mapChar(input[i], ignoreDiacritics);
+    const ch = input[i];
+    if (ch !== undefined) {
+      out += mapChar(ch, ignoreDiacritics);
+    }
   }
   return out;
 }
@@ -134,7 +141,8 @@ export function scoreWniosekItemMatch(
       score += parsed.phrases.includes(term) ? 60 : 25;
       // Extra boost if term appears as a whole word in content
       const idx = normContent.indexOf(term);
-      const beforeOk = idx === 0 || !/[a-z0-9]/.test(normContent[idx - 1]);
+      const prevChar = idx > 0 ? normContent[idx - 1] : undefined;
+      const beforeOk = prevChar === undefined || !/[a-z0-9]/.test(prevChar);
       if (beforeOk) score += 8;
     }
     if (options.scope !== 'content' && normTitle.includes(term)) {
@@ -191,8 +199,10 @@ export function getHighlightSegments(
       const found = normalized.indexOf(term, startIndex);
       if (found === -1) break;
       const origStart = indexMap[found];
-      const origEnd = indexMap[found + term.length - 1] + 1;
-      ranges.push([origStart, origEnd]);
+      const origEndBase = indexMap[found + term.length - 1];
+      if (origStart !== undefined && origEndBase !== undefined) {
+        ranges.push([origStart, origEndBase + 1]);
+      }
       startIndex = found + term.length;
     }
   }

@@ -8,6 +8,7 @@ import {
   TeacherSupervisionPackage,
 } from '../types/reports';
 import { createId } from './documentFactory';
+import { triggerJsonDownload } from './download';
 
 export interface SupervisionPackageJsonPayload {
   app: 'E-Sprawozdania';
@@ -209,7 +210,7 @@ function sanitizeFilenamePart(raw: string): string {
     .slice(0, 48);
 }
 
-export function exportSupervisionPackageAsJson(
+export function buildSupervisionPackagePayload(
   profile: TeacherProfile,
   documents: ReportDocument[],
   options: {
@@ -222,7 +223,7 @@ export function exportSupervisionPackageAsJson(
     senderId: profile.senderId?.trim() || createId(),
   };
   const teacherKey = buildTeacherKey(snapshot, documents);
-  const payload: SupervisionPackageJsonPayload = {
+  return {
     app: 'E-Sprawozdania',
     kind: 'supervision_package',
     version: 1,
@@ -234,24 +235,30 @@ export function exportSupervisionPackageAsJson(
     teacherProfileSnapshot: snapshot,
     documents,
   };
+}
 
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: 'application/json;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const teacherPart = sanitizeFilenamePart(snapshot.fullName || 'nauczyciel') || 'nauczyciel';
+export function exportSupervisionPackageAsJson(
+  profile: TeacherProfile,
+  documents: ReportDocument[],
+  options: {
+    schoolYearFilter: string;
+    semesterFilter: 'all' | SemesterType;
+  }
+): SupervisionPackageJsonPayload | null {
+  const payload = buildSupervisionPackagePayload(profile, documents, options);
+
+  const teacherPart =
+    sanitizeFilenamePart(payload.teacherProfileSnapshot.fullName || 'nauczyciel') || 'nauczyciel';
   const yearPart =
     options.schoolYearFilter !== 'all'
       ? sanitizeFilenamePart(options.schoolYearFilter)
       : 'wszystkie_lata';
   const dateTag = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `nadzor-${teacherPart}-${yearPart}-${dateTag}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const filename = `nadzor-${teacherPart}-${yearPart}-${dateTag}.json`;
+
+  if (!triggerJsonDownload(payload, filename)) {
+    return null;
+  }
 
   return payload;
 }
@@ -458,7 +465,8 @@ export function diffSupervisionPackage(
       continue;
     }
 
-    const [existingDoc] = remainingExisting.splice(matchIndex, 1);
+    const existingDoc = remainingExisting.splice(matchIndex, 1)[0];
+    if (!existingDoc) continue;
     const changes = compareDocumentFields(existingDoc, incomingDoc);
     documentDiffs.push({
       key: `match:${existingDoc.id}:${incomingDoc.id}`,

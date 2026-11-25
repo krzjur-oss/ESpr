@@ -119,7 +119,15 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
 
           <button
             type="button"
-            onClick={() => exportStateAsJson(state)}
+            onClick={() => {
+              const ok = exportStateAsJson(state);
+              if (!ok) {
+                setFeedback({
+                  type: 'error',
+                  message: 'Nie udało się zainicjować pobierania pliku JSON w przeglądarce.',
+                });
+              }
+            }}
             className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 transition-colors cursor-pointer"
           >
             <Download className="w-4 h-4" />

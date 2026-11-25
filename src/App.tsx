@@ -75,11 +75,15 @@ import { triggerWindowPrint } from './utils/printDocument';
 import {
   exportStateAsJson,
   flushPendingAppStateSave,
+  getCurrentStorageBackend,
   getSaveStatus,
+  LegacyMigrationStatus,
   loadAppState,
   mergeImportedTemplates,
   mergeImportedWnioski,
+  reloadAppStateFromDb,
   resetAllStoredState,
+  retryIndexedDbPersistence,
   saveAppStateImmediate,
   SaveStatus,
   scheduleSaveAppState,
@@ -121,8 +125,15 @@ export default function App() {
   const [isHydrating, setIsHydrating] = useState(true);
   const [storageBackend, setStorageBackend] = useState<StorageBackend>('indexeddb');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => getSaveStatus());
+  const [legacyStatus, setLegacyStatus] = useState<LegacyMigrationStatus>('none');
+  const [dbReadError, setDbReadError] = useState<string | null>(null);
   const [hasExternalTabUpdate, setHasExternalTabUpdate] = useState(false);
+  const [isResolvingConflict, setIsResolvingConflict] = useState(false);
+  const [isRetryingPersistence, setIsRetryingPersistence] = useState(false);
+  const [backupImportError, setBackupImportError] = useState<string | null>(null);
+  const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null);
   const hasHydratedRef = useRef(false);
+  const skipNextAutoSaveRef = useRef(false);
   const [activeTab, setActiveTab] = useState<MainTab>('kreator');
   const [aboutSection, setAboutSection] = useState<AboutSection>('info');
   const [layoutMode, setLayoutMode] = useState<EditorLayoutMode>('split');
@@ -172,13 +183,18 @@ export default function App() {
   // Hydrate initial state asynchronously from IndexedDB (migrating legacy localStorage if present)
   useEffect(() => {
     let active = true;
-    void loadAppState().then(({ state: loaded, backend }) => {
-      if (!active) return;
-      hasHydratedRef.current = true;
-      setState(loaded);
-      setStorageBackend(backend);
-      setIsHydrating(false);
-    });
+    void loadAppState().then(
+      ({ state: loaded, backend, legacyStatus: legacy, dbReadError: readErr }) => {
+        if (!active) return;
+        hasHydratedRef.current = true;
+        skipNextAutoSaveRef.current = true;
+        setState(loaded);
+        setStorageBackend(backend);
+        setLegacyStatus(legacy);
+        setDbReadError(readErr ?? null);
+        setIsHydrating(false);
+      }
+    );
     return () => {
       active = false;
     };
@@ -186,7 +202,10 @@ export default function App() {
 
   // Subscribe to IndexedDB write status and cross-tab notifications
   useEffect(() => {
-    const unsubSave = subscribeSaveStatus(setSaveStatus);
+    const unsubSave = subscribeSaveStatus((nextStatus) => {
+      setSaveStatus(nextStatus);
+      setStorageBackend(getCurrentStorageBackend());
+    });
     const unsubCrossTab = subscribeCrossTabChanges(() => {
       setHasExternalTabUpdate(true);
     });
@@ -199,6 +218,10 @@ export default function App() {
   // Persist changes incrementally to IndexedDB (only after initial hydration)
   useEffect(() => {
     if (!hasHydratedRef.current) return;
+    if (skipNextAutoSaveRef.current) {
+      skipNextAutoSaveRef.current = false;
+      return;
+    }
     scheduleSaveAppState(state);
   }, [state]);
 
@@ -608,7 +631,9 @@ export default function App() {
     }));
   };
 
-  const handleImportPhrases = (payload: PhrasesImportPayload): PhrasesImportSummary => {
+  const handleImportPhrases = async (
+    payload: PhrasesImportPayload
+  ): Promise<PhrasesImportSummary> => {
     const snapshot = stateRef.current;
     const wnioskiSummary = payload.includeWnioski
       ? mergeImportedWnioski(snapshot.customWnioski, payload.incomingWnioski, payload.mode)
@@ -617,25 +642,90 @@ export default function App() {
       ? mergeImportedTemplates(snapshot.customTemplates, payload.incomingTemplates, payload.mode)
       : { entries: snapshot.customTemplates, added: 0, skippedDuplicates: 0 };
 
-    setState((prev) => ({
-      ...prev,
-      customWnioski: payload.includeWnioski
-        ? mergeImportedWnioski(prev.customWnioski, payload.incomingWnioski, payload.mode).entries
-        : prev.customWnioski,
-      customTemplates: payload.includeTemplates
-        ? mergeImportedTemplates(prev.customTemplates, payload.incomingTemplates, payload.mode)
-            .entries
-        : prev.customTemplates,
-    }));
+    const nextState: AppState = {
+      ...snapshot,
+      customWnioski: wnioskiSummary.entries,
+      customTemplates: templatesSummary.entries,
+    };
+
+    if (storageBackend === 'indexeddb') {
+      const saveRes = await saveAppStateImmediate(nextState);
+      setStorageBackend(getCurrentStorageBackend());
+      if (!saveRes.ok) {
+        return {
+          ok: false,
+          error:
+            saveRes.reason === 'conflict'
+              ? 'Wykryto konflikt wersji z inną kartą. Wczytaj nowszą wersję z bazy przed importem.'
+              : saveRes.error || 'Nie udało się trwale zapisać zaimportowanych wpisów w IndexedDB.',
+          addedWnioski: 0,
+          addedTemplates: 0,
+          skippedDuplicates: 0,
+        };
+      }
+    }
+
+    skipNextAutoSaveRef.current = true;
+    setState(nextState);
 
     return {
+      ok: true,
       addedWnioski: wnioskiSummary.added,
       addedTemplates: templatesSummary.added,
       skippedDuplicates: wnioskiSummary.skippedDuplicates + templatesSummary.skippedDuplicates,
     };
   };
 
-  const handleConfirmAction = () => {
+  const handleDownloadBackupJson = () => {
+    const ok = exportStateAsJson(stateRef.current);
+    if (!ok) {
+      setPersistenceNotice('Nie udało się zainicjować pobierania pliku JSON w przeglądarce.');
+    } else {
+      setPersistenceNotice(null);
+    }
+  };
+
+  const handleReloadFromDb = async () => {
+    if (isResolvingConflict) return;
+    setIsResolvingConflict(true);
+    setPersistenceNotice(null);
+    try {
+      const res = await reloadAppStateFromDb();
+      if (res.ok) {
+        skipNextAutoSaveRef.current = true;
+        setState(res.state);
+        setStorageBackend('indexeddb');
+        setHasExternalTabUpdate(false);
+        setDbReadError(null);
+      } else {
+        setPersistenceNotice(res.error);
+      }
+    } finally {
+      setIsResolvingConflict(false);
+    }
+  };
+
+  const handleRetryPersistence = async () => {
+    if (isRetryingPersistence) return;
+    setIsRetryingPersistence(true);
+    setPersistenceNotice(null);
+    try {
+      const res = await retryIndexedDbPersistence(stateRef.current);
+      setStorageBackend(getCurrentStorageBackend());
+      if (res.ok) {
+        setDbReadError(null);
+        setLegacyStatus('none');
+      } else {
+        setPersistenceNotice(
+          res.error || 'Przeglądarka nadal blokuje trwały zapis w IndexedDB.'
+        );
+      }
+    } finally {
+      setIsRetryingPersistence(false);
+    }
+  };
+
+  const handleConfirmAction = async () => {
     if (!confirmDialog) return;
     if (confirmDialog.kind === 'delete_doc') {
       const targetId = confirmDialog.doc.id;
@@ -665,22 +755,58 @@ export default function App() {
         message: `Usunięto paczkę nauczyciela „${resolvePackageTeacherName(confirmDialog.pkg)}” i przeliczono sprawozdania klas.`,
       });
     } else if (confirmDialog.kind === 'import_backup') {
+      setBackupImportError(null);
       if (backupDownloadFirst) {
-        exportStateAsJson(stateRef.current);
+        const dlOk = exportStateAsJson(stateRef.current);
+        if (!dlOk) {
+          setBackupImportError(
+            'Nie udało się pobrać kopii zapasowej bieżących danych przed nadpisaniem. Zmień opcję lub sprawdź blokadę pobierania w przeglądarce.'
+          );
+          return;
+        }
       }
       const next = confirmDialog.nextState;
+      if (storageBackend === 'indexeddb') {
+        const res = await saveAppStateImmediate(next, {
+          replaceAll: true,
+          forceOverwriteRevision: true,
+        });
+        setStorageBackend(getCurrentStorageBackend());
+        if (!res.ok && res.reason !== 'unavailable') {
+          setBackupImportError(
+            res.error ||
+              'Nie udało się zapisać zaimportowanych danych w IndexedDB. Poprzednie dane zostały zachowane.'
+          );
+          return;
+        }
+      }
+      skipNextAutoSaveRef.current = true;
       setState(next);
       setYearFilter('all');
       setSelectedPrintIds([]);
       setActiveTab('kreator');
-      void saveAppStateImmediate(next, { replaceAll: true });
+      setHasExternalTabUpdate(false);
     } else if (confirmDialog.kind === 'reset_all') {
+      setBackupImportError(null);
       const fresh = createInitialAppState();
+      const res = await resetAllStoredState(fresh);
+      setStorageBackend(getCurrentStorageBackend());
+      if (!res.ok && res.reason === 'error') {
+        setBackupImportError(
+          res.error || 'Nie udało się wyczyścić lokalnej bazy IndexedDB.'
+        );
+        return;
+      }
+      skipNextAutoSaveRef.current = true;
       setState(fresh);
       setYearFilter('all');
+      setSelectedPrintIds([]);
       setActiveTab('kreator');
-      void resetAllStoredState(fresh);
+      setHasExternalTabUpdate(false);
+      setLegacyStatus('none');
+      setDbReadError(null);
     }
+    setBackupImportError(null);
     setConfirmDialog(null);
   };
 
@@ -737,6 +863,7 @@ export default function App() {
           added += 1;
         } else {
           const existingPkg = working[existingIdx];
+          if (!existingPkg) continue;
           const diff = diffSupervisionPackage(existingPkg, incoming);
           if (diff.hasAnyChanges) {
             diffs.push(diff);
@@ -776,7 +903,7 @@ export default function App() {
     ) {
       setSupervisionFeedback({
         type: 'error',
-        message: summary.errors[0],
+        message: summary.errors[0] ?? 'Nie udało się zaimportować wybranych plików.',
       });
     } else {
       const parts: string[] = [];
@@ -949,7 +1076,95 @@ export default function App() {
         hasDocuments={hasPrintableContent}
       />
 
-      {saveStatus === 'error' && (
+      {saveStatus === 'conflict' && (
+        <div
+          role="alert"
+          className="no-print border-b border-red-300 bg-red-50 px-4 md:px-6 py-2.5 text-xs text-red-950"
+        >
+          <div className="mx-auto max-w-[1440px] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>
+                Wykryto konflikt wersji danych — baza została zaktualizowana w innej karcie. Zapis z tej karty został wstrzymany, aby nie nadpisać nowszych zmian.
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadBackupJson}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Pobierz swoje zmiany (JSON)</span>
+              </button>
+              <button
+                type="button"
+                disabled={isResolvingConflict}
+                onClick={() => void handleReloadFromDb()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{isResolvingConflict ? 'Wczytywanie…' : 'Wczytaj nowszą wersję z bazy'}</span>
+              </button>
+            </div>
+          </div>
+          {persistenceNotice && (
+            <p className="mx-auto max-w-[1440px] mt-1.5 text-[11px] font-medium text-red-800">
+              {persistenceNotice}
+            </p>
+          )}
+        </div>
+      )}
+
+      {saveStatus !== 'conflict' &&
+        (storageBackend === 'memory' || saveStatus === 'memory_only') && (
+          <div
+            role="alert"
+            className="no-print border-b border-amber-300 bg-amber-50 px-4 md:px-6 py-2.5 text-xs text-amber-950"
+          >
+            <div className="mx-auto max-w-[1440px] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  Tryb awaryjny — aplikacja działa wyłącznie w pamięci RAM (brak trwałego zapisu w IndexedDB). Zmiany mogą zniknąć po odświeżeniu lub zamknięciu karty.
+                  {legacyStatus === 'migration_write_failed'
+                    ? ' Starsze dane w localStorage nie zostały usunięte.'
+                    : dbReadError
+                      ? ` (${dbReadError})`
+                      : ''}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadBackupJson}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Pobierz kopię JSON</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isRetryingPersistence}
+                  onClick={() => void handleRetryPersistence()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>
+                    {isRetryingPersistence ? 'Próba zapisu…' : 'Ponów zapis w IndexedDB'}
+                  </span>
+                </button>
+              </div>
+            </div>
+            {persistenceNotice && (
+              <p className="mx-auto max-w-[1440px] mt-1.5 text-[11px] font-medium text-amber-900">
+                {persistenceNotice}
+              </p>
+            )}
+          </div>
+        )}
+
+      {saveStatus === 'error' && storageBackend === 'indexeddb' && (
         <div
           role="alert"
           className="no-print border-b border-red-200 bg-red-50 px-4 md:px-6 py-2.5 text-xs text-red-900"
@@ -958,22 +1173,35 @@ export default function App() {
             <div className="flex items-center gap-2 font-medium">
               <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
               <span>
-                Nie udało się zapisać zmian w przeglądarce. Pobierz kopię JSON, aby zabezpieczyć dane.
+                {legacyStatus === 'corrupted' || legacyStatus === 'read_error'
+                  ? 'Wykryto problem z odczytem starszych danych z localStorage — oryginalny wpis został zachowany bez usunięcia. Pobierz kopię JSON lub kontynuuj ostrożnie.'
+                  : 'Nie udało się zapisać zmian w bazie IndexedDB. Pobierz kopię JSON, aby zabezpieczyć dane.'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => exportStateAsJson(state)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Pobierz kopię JSON</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadBackupJson}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Pobierz kopię JSON</span>
+              </button>
+              <button
+                type="button"
+                disabled={isRetryingPersistence}
+                onClick={() => void handleRetryPersistence()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{isRetryingPersistence ? 'Zapisywanie…' : 'Ponów zapis'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {hasExternalTabUpdate && (
+      {hasExternalTabUpdate && saveStatus !== 'conflict' && (
         <div
           role="status"
           className="no-print border-b border-amber-200 bg-amber-50 px-4 md:px-6 py-2.5 text-xs text-amber-950"
@@ -982,16 +1210,17 @@ export default function App() {
             <div className="flex items-center gap-2 font-medium">
               <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
               <span>
-                Dane zostały zmienione w innej karcie. Odśwież stronę, aby uniknąć utraty zmian.
+                Dane zostały zmienione w innej karcie. Wczytaj najnowszą wersję z bazy, aby uniknąć konfliktu zapisu.
               </span>
             </div>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              disabled={isResolvingConflict}
+              onClick={() => void handleReloadFromDb()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Odśwież</span>
+              <span>{isResolvingConflict ? 'Wczytywanie…' : 'Wczytaj z bazy'}</span>
             </button>
           </div>
         </div>
@@ -1164,14 +1393,25 @@ export default function App() {
                     </span>
                   )}
                   <span className="text-slate-300" aria-hidden="true">·</span>
-                  <span className={saveStatus === 'error' ? 'font-semibold text-red-700' : ''}>
-                    {storageBackend !== 'indexeddb'
-                      ? 'Tryb tymczasowy (IndexedDB zablokowane)'
-                      : saveStatus === 'saving'
-                        ? 'Zapisywanie w IndexedDB…'
-                        : saveStatus === 'error'
-                          ? 'Błąd zapisu w IndexedDB'
-                          : 'Zapisano w IndexedDB'}
+                  <span
+                    className={
+                      saveStatus === 'error' ||
+                      saveStatus === 'conflict' ||
+                      saveStatus === 'memory_only' ||
+                      storageBackend !== 'indexeddb'
+                        ? 'font-semibold text-red-700'
+                        : ''
+                    }
+                  >
+                    {storageBackend !== 'indexeddb' || saveStatus === 'memory_only'
+                      ? 'Tylko w pamięci RAM (brak trwałego zapisu)'
+                      : saveStatus === 'conflict'
+                        ? 'Konflikt wersji — wykryto nowsze dane w bazie'
+                        : saveStatus === 'saving'
+                          ? 'Zapisywanie w IndexedDB…'
+                          : saveStatus === 'error'
+                            ? 'Błąd zapisu w IndexedDB'
+                            : 'Zapisano w IndexedDB'}
                   </span>
                 </div>
 
@@ -1581,8 +1821,11 @@ export default function App() {
                   ? 'Zastąp dane kopią'
                   : 'Wyczyść wszystko'
         }
-        onConfirm={handleConfirmAction}
-        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => void handleConfirmAction()}
+        onCancel={() => {
+          setBackupImportError(null);
+          setConfirmDialog(null);
+        }}
       >
         {confirmDialog?.kind === 'import_backup' && (
           <div className="space-y-3">
@@ -1622,6 +1865,14 @@ export default function App() {
                 <strong>Najpierw pobierz kopię bieżących danych</strong> (plik JSON z obecną sesją zostanie zapisany na dysku przed nadpisaniem)
               </span>
             </label>
+          </div>
+        )}
+        {backupImportError && (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-900"
+          >
+            {backupImportError}
           </div>
         )}
       </ConfirmModal>

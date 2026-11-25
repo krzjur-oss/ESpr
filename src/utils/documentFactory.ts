@@ -71,8 +71,9 @@ function extractGradeNumber(token: string): number | null {
     return Number(digitMatch[1]);
   }
   const romanMatch = cleaned.match(/^(viii|vii|vi|iv|v|iii|ii|i)(?=[a-z]|$)/);
-  if (romanMatch && romanMatch[1] in ROMAN_GRADES) {
-    return ROMAN_GRADES[romanMatch[1]];
+  const romanKey = romanMatch?.[1];
+  if (romanKey && romanKey in ROMAN_GRADES) {
+    return ROMAN_GRADES[romanKey] ?? null;
   }
   return null;
 }
@@ -83,7 +84,7 @@ function parseRangeBound(raw: string): number | null {
     return Number(cleaned);
   }
   if (cleaned in ROMAN_GRADES) {
-    return ROMAN_GRADES[cleaned];
+    return ROMAN_GRADES[cleaned] ?? null;
   }
   return null;
 }
@@ -126,9 +127,11 @@ export function scoreClassScopeMatch(scope: string, className: string): number {
 
     // 3. Range match (e.g. "1-4", "1–4", "I-III", "5-8")
     const rangeParts = segment.split(/\s*[-–—]\s*/);
-    if (rangeParts.length === 2 && grade !== null) {
-      const start = parseRangeBound(rangeParts[0]);
-      const end = parseRangeBound(rangeParts[1]);
+    const rawStart = rangeParts[0];
+    const rawEnd = rangeParts[1];
+    if (rangeParts.length === 2 && rawStart !== undefined && rawEnd !== undefined && grade !== null) {
+      const start = parseRangeBound(rawStart);
+      const end = parseRangeBound(rawEnd);
       if (start !== null && end !== null) {
         const min = Math.min(start, end);
         const max = Math.max(start, end);

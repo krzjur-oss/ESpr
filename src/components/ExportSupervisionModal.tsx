@@ -32,6 +32,7 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [inlineTeacherName, setInlineTeacherName] = useState('');
   const [exportedDone, setExportedDone] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const candidateDocuments = useMemo(() => {
     return documents.filter((doc) => {
@@ -63,6 +64,7 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
     setSemesterFilter('all');
     setInlineTeacherName(profile.fullName);
     setExportedDone(false);
+    setExportError(null);
   }, [isOpen, defaultYearFilter, profile.schoolYear, profile.fullName, availableYears]);
 
   useEffect(() => {
@@ -91,10 +93,15 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
       ...profile,
       fullName: effectiveTeacherName,
     };
-    exportSupervisionPackageAsJson(signedProfile, selectedDocs, {
+    const pkg = exportSupervisionPackageAsJson(signedProfile, selectedDocs, {
       schoolYearFilter: yearFilter,
       semesterFilter,
     });
+    if (!pkg) {
+      setExportError('Nie udało się zainicjować pobierania pliku paczki JSON w przeglądarce.');
+      return;
+    }
+    setExportError(null);
     setExportedDone(true);
     setTimeout(() => {
       setExportedDone(false);
@@ -279,6 +286,13 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
           <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs text-amber-900 leading-relaxed">
             <strong>Uwaga RODO:</strong> Eksportowana paczka JSON może zawierać imiona i nazwiska uczniów oraz dane profilu (dane osobowe). Plik nie jest szyfrowany — przekaż go dyrekcji bezpiecznym kanałem i usuń z dysku po zaimportowaniu.
           </div>
+
+          {exportError && (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-900">
+              <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>{exportError}</span>
+            </div>
+          )}
 
           {exportedDone && (
             <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-900">

@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7';
+export const APP_VERSION = '1.7.1';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,21 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.7.1',
+    date: '25.11.2026',
+    title: 'Utwardzenie zapisu IndexedDB, walidacji kopii i pełny tryb offline',
+    summary:
+      'Wprowadzono ochronę przed konfliktami zapisu między kartami, atomowy import danych, bezpieczną migrację starszego archiwum, lokalne fonty offline oraz zestaw testów automatycznych.',
+    changes: [
+      'Dodano transakcyjną kontrolę rewizji danych w IndexedDB oraz kolejkę serializującą zapisy, chroniącą przed nadpisaniem nowszych zmian z innej karty przeglądarki.',
+      'Rozszerzono wskaźnik i komunikaty statusu zapisu (zapisywanie, zapisano, konflikt wersji z możliwością wczytania nowszych danych z bazy, błąd zapisu oraz tryb awaryjny w pamięci RAM z ponowną próbą zapisu i eksportem JSON).',
+      'Uszczelniono walidację oraz atomowość importu pełnych kopii JSON, paczek nadzoru oraz paczek wniosków i szablonów (odrzucanie duplikatów identyfikatorów i nieprawidłowych struktur przed jakąkolwiek zmianą w bazie).',
+      'Zabezpieczono migrację ze starszego zapisu localStorage (zachowanie klucza źródłowego przy błędzie odczytu, uszkodzeniu lub nieudanym zapisie w IndexedDB) oraz wydłużono bezpieczne zwalnianie adresów Blob przy pobieraniu plików JSON.',
+      'Dołączono lokalnie używane kroje pisma (Plus Jakarta Sans, Source Serif 4, JetBrains Mono), eliminując zewnętrzne żądania do Google Fonts i zapewniając 100% niezależności offline PWA.',
+      'Zaostrzono konfigurację TypeScript (strict oraz noUncheckedIndexedAccess) i dodano testy automatyczne Vitest + fake-indexeddb.',
+    ],
+  },
   {
     version: '1.7',
     date: '25.11.2026',

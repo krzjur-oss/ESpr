@@ -260,11 +260,13 @@ export function getProfileSubjectOptions(profile: TeacherProfile): ProfileComboO
     grouped.set(key, list);
   }
 
-  const fromAssignments: ProfileComboOption[] = Array.from(grouped.values()).map((items) => {
-    const subjectName = items[0].subject.trim();
-    const scopes = Array.from(
-      new Set(items.map((i) => i.classScope?.trim()).filter(Boolean))
-    );
+  const fromAssignments: ProfileComboOption[] = Array.from(grouped.values())
+    .filter((items) => items.length > 0)
+    .map((items) => {
+      const subjectName = items[0]?.subject.trim() ?? '';
+      const scopes = Array.from(
+        new Set(items.map((i) => i.classScope?.trim()).filter(Boolean))
+      );
     const programs = Array.from(
       new Set(items.map((i) => i.programNumber.trim()).filter(Boolean))
     );

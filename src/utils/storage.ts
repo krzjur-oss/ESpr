@@ -37,76 +37,50 @@ import {
   createId,
   createInitialAppState,
 } from './documentFactory';
+import { triggerJsonDownload } from './download';
 import { buildTeacherKey } from './supervision';
+
+export const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
+export const DB_NAME = 'esprawozdania_db';
+export const DB_VERSION = 3;
+
+const STORE_META = 'meta';
+const STORE_DOCUMENTS = 'documents';
+const STORE_WNIOSKI = 'customWnioski';
+const STORE_TEMPLATES = 'customTemplates';
+const STORE_SUPERVISION_PACKAGES = 'supervisionPackages';
+const BROADCAST_CHANNEL_NAME = 'esprawozdania';
+
+const MAX_TEXT_LENGTH = 100_000;
+const MAX_SHORT_LENGTH = 500;
+const FORBIDDEN_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const VALID_WNIOSEK_CATEGORY_IDS = new Set<string>(
   WNIOSKI_CATEGORY_OPTIONS.map((opt) => opt.id)
 );
-
-function sanitizeCustomWnioski(raw: unknown): CustomWniosekEntry[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(
-      (item): item is Partial<CustomWniosekEntry> & { text: string } =>
-        !!item &&
-        typeof item === 'object' &&
-        typeof (item as CustomWniosekEntry).text === 'string' &&
-        (item as CustomWniosekEntry).text.trim().length > 0
-    )
-    .map((item) => ({
-      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
-      categoryId:
-        typeof item.categoryId === 'string' && VALID_WNIOSEK_CATEGORY_IDS.has(item.categoryId)
-          ? item.categoryId
-          : CUSTOM_WNIOSKI_CATEGORY_ID,
-      text: item.text.trim(),
-      createdAt:
-        typeof item.createdAt === 'string' && item.createdAt.trim()
-          ? item.createdAt
-          : new Date().toISOString(),
-    }));
-}
-
 const VALID_TEMPLATE_CATEGORIES = new Set<string>(Object.keys(TEMPLATE_CATEGORY_LABELS));
-
-function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(
-      (item): item is Partial<CustomTemplateEntry> & { content: string } =>
-        !!item &&
-        typeof item === 'object' &&
-        typeof (item as CustomTemplateEntry).content === 'string' &&
-        (item as CustomTemplateEntry).content.trim().length > 0
-    )
-    .map((item) => ({
-      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
-      title:
-        typeof item.title === 'string' && item.title.trim()
-          ? item.title.trim()
-          : 'Szablon własny',
-      category:
-        typeof item.category === 'string' && VALID_TEMPLATE_CATEGORIES.has(item.category)
-          ? (item.category as TemplateSectionCategory)
-          : 'ogolne',
-      content: item.content.trim(),
-      createdAt:
-        typeof item.createdAt === 'string' && item.createdAt.trim()
-          ? item.createdAt
-          : new Date().toISOString(),
-    }));
-}
-
 const VALID_CURRICULUM_STATUSES = new Set<CurriculumStatus>([
   'na_biezaco',
   'opoznienie',
   'wyprzedzenie',
 ]);
-
 const VALID_SPECIALIST_ROLES = new Set<string>(Object.keys(SPECIALIST_ROLE_LABELS));
+export const VALID_DOC_TYPES = new Set<string>([
+  'efekty_nauczania',
+  'zbiorcze_efekty',
+  'karta_informacyjna',
+  'podsumowanie_specjalisty',
+  'uzasadnienie_nieklasyfikowania',
+  'uzasadnienie_ndst',
+]);
 
-function asStr(val: unknown, fallback: string): string {
-  return typeof val === 'string' ? val : fallback;
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return !!val && typeof val === 'object' && !Array.isArray(val);
+}
+
+function asStr(val: unknown, fallback: string, maxLen = MAX_TEXT_LENGTH): string {
+  if (typeof val !== 'string') return fallback;
+  return val.length > maxLen ? val.slice(0, maxLen) : val;
 }
 
 function asBool(val: unknown, fallback: boolean): boolean {
@@ -132,26 +106,147 @@ function asClassificationPeriod(
 
 function asStringArray<T extends string>(val: unknown, fallback: T[]): T[] {
   if (!Array.isArray(val)) return fallback;
-  return val.filter((item): item is T => typeof item === 'string' && item.trim().length > 0);
+  return val.filter(
+    (item): item is T =>
+      typeof item === 'string' && item.trim().length > 0 && item.length <= MAX_SHORT_LENGTH
+  );
+}
+
+function sanitizeIsoDate(val: unknown, fallback: string): string {
+  if (typeof val !== 'string') return fallback;
+  const trimmed = val.trim();
+  if (!trimmed || trimmed.length > 64) return fallback;
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return fallback;
+  return trimmed;
+}
+
+function findDuplicateExplicitId(
+  items: unknown[],
+  nestedKeys: string[] = []
+): { kind: 'top' | 'nested'; id: string; nestedKey?: string } | null {
+  const seenTop = new Set<string>();
+  for (const item of items) {
+    if (!isPlainObject(item)) continue;
+    if (typeof item.id === 'string' && item.id.trim().length > 0) {
+      const id = item.id.trim();
+      if (seenTop.has(id)) {
+        return { kind: 'top', id };
+      }
+      seenTop.add(id);
+    }
+
+    for (const key of nestedKeys) {
+      const nested = item[key];
+      if (!Array.isArray(nested)) continue;
+      const seenNested = new Set<string>();
+      for (const sub of nested) {
+        if (!isPlainObject(sub)) continue;
+        if (typeof sub.id === 'string' && sub.id.trim().length > 0) {
+          const subId = sub.id.trim();
+          if (seenNested.has(subId)) {
+            return { kind: 'nested', id: subId, nestedKey: key };
+          }
+          seenNested.add(subId);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function sanitizeCustomWnioski(raw: unknown): CustomWniosekEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const seenIds = new Set<string>();
+  const nowFallback = new Date().toISOString();
+
+  return raw
+    .filter(
+      (item): item is Partial<CustomWniosekEntry> & { text: string } =>
+        isPlainObject(item) &&
+        typeof item.text === 'string' &&
+        item.text.trim().length > 0
+    )
+    .map((item) => {
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
+      if (seenIds.has(id)) {
+        id = createId();
+      }
+      seenIds.add(id);
+
+      return {
+        id,
+        categoryId:
+          typeof item.categoryId === 'string' && VALID_WNIOSEK_CATEGORY_IDS.has(item.categoryId)
+            ? item.categoryId
+            : CUSTOM_WNIOSKI_CATEGORY_ID,
+        text: item.text.trim().slice(0, MAX_TEXT_LENGTH),
+        createdAt: sanitizeIsoDate(item.createdAt, nowFallback),
+      };
+    });
+}
+
+export function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const seenIds = new Set<string>();
+  const nowFallback = new Date().toISOString();
+
+  return raw
+    .filter(
+      (item): item is Partial<CustomTemplateEntry> & { content: string } =>
+        isPlainObject(item) &&
+        typeof item.content === 'string' &&
+        item.content.trim().length > 0
+    )
+    .map((item) => {
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
+      if (seenIds.has(id)) {
+        id = createId();
+      }
+      seenIds.add(id);
+
+      return {
+        id,
+        title:
+          typeof item.title === 'string' && item.title.trim()
+            ? item.title.trim().slice(0, MAX_SHORT_LENGTH)
+            : 'Szablon własny',
+        category:
+          typeof item.category === 'string' && VALID_TEMPLATE_CATEGORIES.has(item.category)
+            ? (item.category as TemplateSectionCategory)
+            : 'ogolne',
+        content: item.content.trim().slice(0, MAX_TEXT_LENGTH),
+        createdAt: sanitizeIsoDate(item.createdAt, nowFallback),
+      };
+    });
 }
 
 function sanitizeZbiorczeRows(raw: unknown, fallback: ZbiorczeRow[]): ZbiorczeRow[] {
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
   return raw
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .filter((item): item is Record<string, unknown> => isPlainObject(item))
     .map((item) => {
-      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
       if (seenIds.has(id)) id = createId();
       seenIds.add(id);
       return {
         id,
-        className: asStr(item.className, ''),
-        teacherName: asStr(item.teacherName, ''),
+        className: asStr(item.className, '', MAX_SHORT_LENGTH),
+        teacherName: asStr(item.teacherName, '', MAX_SHORT_LENGTH),
         curriculumStatus: asCurriculumStatus(item.curriculumStatus, 'na_biezaco'),
         curriculumDetails: asStr(item.curriculumDetails, ''),
-        failingCount: asStr(item.failingCount, '0'),
-        excellentCount: asStr(item.excellentCount, '0'),
+        failingCount: asStr(item.failingCount, '0', 32),
+        excellentCount: asStr(item.excellentCount, '0', 32),
         notes: asStr(item.notes, ''),
       };
     });
@@ -164,15 +259,18 @@ function sanitizeSubjectHoursRows(
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
   return raw
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .filter((item): item is Record<string, unknown> => isPlainObject(item))
     .map((item) => {
-      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
       if (seenIds.has(id)) id = createId();
       seenIds.add(id);
       return {
         id,
-        subject: asStr(item.subject, ''),
-        hours: asStr(item.hours, ''),
+        subject: asStr(item.subject, '', MAX_SHORT_LENGTH),
+        hours: asStr(item.hours, '', 64),
       };
     });
 }
@@ -184,9 +282,12 @@ function sanitizeAdditionalTaskRows(
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
   return raw
-    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .filter((item): item is Record<string, unknown> => isPlainObject(item))
     .map((item) => {
-      let id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId();
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
       if (seenIds.has(id)) id = createId();
       seenIds.add(id);
       return {
@@ -203,27 +304,29 @@ function sanitizeSingleDocument(
   fallbackProfile: TeacherProfile,
   seenIds: Set<string>
 ): ReportDocument | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const obj = raw as Record<string, unknown>;
-  if (typeof obj.type !== 'string' || !VALID_DOC_TYPES.has(obj.type)) {
+  if (!isPlainObject(raw)) return null;
+  if (typeof raw.type !== 'string' || !VALID_DOC_TYPES.has(raw.type)) {
     return null;
   }
 
-  const docType = obj.type as DocumentType;
-  let id = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : createId();
+  const docType = raw.type as DocumentType;
+  let id =
+    typeof raw.id === 'string' && raw.id.trim()
+      ? raw.id.trim().slice(0, MAX_SHORT_LENGTH)
+      : createId();
   if (seenIds.has(id)) {
     id = createId();
   }
   seenIds.add(id);
 
   const specialistRole: SpecialistRole =
-    typeof obj.role === 'string' && VALID_SPECIALIST_ROLES.has(obj.role)
-      ? (obj.role as SpecialistRole)
+    typeof raw.role === 'string' && VALID_SPECIALIST_ROLES.has(raw.role)
+      ? (raw.role as SpecialistRole)
       : 'pedagog_psycholog';
   const coordinatorMode: 'przedmiotowy' | 'wczesnoszkolna' =
-    obj.mode === 'wczesnoszkolna' ? 'wczesnoszkolna' : 'przedmiotowy';
+    raw.mode === 'wczesnoszkolna' ? 'wczesnoszkolna' : 'przedmiotowy';
   const classPeriod: ClassificationPeriod = asClassificationPeriod(
-    obj.classificationPeriod,
+    raw.classificationPeriod,
     'srodroczne'
   );
 
@@ -231,17 +334,17 @@ function sanitizeSingleDocument(
     specialistRole,
     coordinatorMode,
     classificationPeriod: classPeriod,
-    schoolYear: typeof obj.schoolYear === 'string' ? obj.schoolYear : undefined,
+    schoolYear: typeof raw.schoolYear === 'string' ? raw.schoolYear.slice(0, 64) : undefined,
   });
 
   const common = {
     id,
-    title: asStr(obj.title, base.title),
-    createdAt: typeof obj.createdAt === 'string' && obj.createdAt.trim() ? obj.createdAt : base.createdAt,
-    updatedAt: typeof obj.updatedAt === 'string' && obj.updatedAt.trim() ? obj.updatedAt : base.updatedAt,
-    schoolName: asStr(obj.schoolName, base.schoolName),
-    schoolYear: asStr(obj.schoolYear, base.schoolYear),
-    signatureDate: asStr(obj.signatureDate, base.signatureDate),
+    title: asStr(raw.title, base.title, MAX_SHORT_LENGTH),
+    createdAt: sanitizeIsoDate(raw.createdAt, base.createdAt),
+    updatedAt: sanitizeIsoDate(raw.updatedAt, base.updatedAt),
+    schoolName: asStr(raw.schoolName, base.schoolName, MAX_SHORT_LENGTH),
+    schoolYear: asStr(raw.schoolYear, base.schoolYear, 64),
+    signatureDate: asStr(raw.signatureDate, base.signatureDate, 64),
   };
 
   switch (base.type) {
@@ -251,33 +354,33 @@ function sanitizeSingleDocument(
         ...def,
         ...common,
         type: 'efekty_nauczania',
-        semester: asSemester(obj.semester, def.semester),
-        teacherName: asStr(obj.teacherName, def.teacherName),
-        subject: asStr(obj.subject, def.subject),
-        programNumber: asStr(obj.programNumber, def.programNumber),
-        textbookNumber: asStr(obj.textbookNumber, def.textbookNumber),
-        textbookTitle: asStr(obj.textbookTitle, def.textbookTitle),
-        className: asStr(obj.className, def.className),
-        curriculumStatus: asCurriculumStatus(obj.curriculumStatus, def.curriculumStatus),
-        curriculumScope: asStr(obj.curriculumScope, def.curriculumScope),
-        curriculumNotes: asStr(obj.curriculumNotes, def.curriculumNotes),
-        failingGradesCount: asStr(obj.failingGradesCount, def.failingGradesCount),
-        excellentGradesCount: asStr(obj.excellentGradesCount, def.excellentGradesCount),
-        gradesNotes: asStr(obj.gradesNotes, def.gradesNotes),
+        semester: asSemester(raw.semester, def.semester),
+        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        programNumber: asStr(raw.programNumber, def.programNumber, MAX_SHORT_LENGTH),
+        textbookNumber: asStr(raw.textbookNumber, def.textbookNumber, MAX_SHORT_LENGTH),
+        textbookTitle: asStr(raw.textbookTitle, def.textbookTitle, MAX_SHORT_LENGTH),
+        className: asStr(raw.className, def.className, 64),
+        curriculumStatus: asCurriculumStatus(raw.curriculumStatus, def.curriculumStatus),
+        curriculumScope: asStr(raw.curriculumScope, def.curriculumScope),
+        curriculumNotes: asStr(raw.curriculumNotes, def.curriculumNotes),
+        failingGradesCount: asStr(raw.failingGradesCount, def.failingGradesCount, 32),
+        excellentGradesCount: asStr(raw.excellentGradesCount, def.excellentGradesCount, 32),
+        gradesNotes: asStr(raw.gradesNotes, def.gradesNotes),
         individualPathNotApplicable: asBool(
-          obj.individualPathNotApplicable,
+          raw.individualPathNotApplicable,
           def.individualPathNotApplicable
         ),
-        individualPathSummary: asStr(obj.individualPathSummary, def.individualPathSummary),
-        competitionsNone: asBool(obj.competitionsNone, def.competitionsNone),
-        competitionsDetails: asStr(obj.competitionsDetails, def.competitionsDetails),
-        educationalTrips: asStr(obj.educationalTrips, def.educationalTrips),
-        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        individualPathSummary: asStr(raw.individualPathSummary, def.individualPathSummary),
+        competitionsNone: asBool(raw.competitionsNone, def.competitionsNone),
+        competitionsDetails: asStr(raw.competitionsDetails, def.competitionsDetails),
+        educationalTrips: asStr(raw.educationalTrips, def.educationalTrips),
+        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
         previousConclusionsStatus: asStr(
-          obj.previousConclusionsStatus,
+          raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
+        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'zbiorcze_efekty': {
@@ -286,21 +389,21 @@ function sanitizeSingleDocument(
         ...def,
         ...common,
         type: 'zbiorcze_efekty',
-        semester: asSemester(obj.semester, def.semester),
-        coordinatorName: asStr(obj.coordinatorName, def.coordinatorName),
-        subjectOrStage: asStr(obj.subjectOrStage, def.subjectOrStage),
+        semester: asSemester(raw.semester, def.semester),
+        coordinatorName: asStr(raw.coordinatorName, def.coordinatorName, MAX_SHORT_LENGTH),
+        subjectOrStage: asStr(raw.subjectOrStage, def.subjectOrStage, MAX_SHORT_LENGTH),
         mode: coordinatorMode,
-        rows: sanitizeZbiorczeRows(obj.rows, def.rows),
-        earlyEdWeakAreas: asStr(obj.earlyEdWeakAreas, def.earlyEdWeakAreas),
-        earlyEdStrongAreas: asStr(obj.earlyEdStrongAreas, def.earlyEdStrongAreas),
-        achievements: asStr(obj.achievements, def.achievements),
-        educationalTrips: asStr(obj.educationalTrips, def.educationalTrips),
-        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        rows: sanitizeZbiorczeRows(raw.rows, def.rows),
+        earlyEdWeakAreas: asStr(raw.earlyEdWeakAreas, def.earlyEdWeakAreas),
+        earlyEdStrongAreas: asStr(raw.earlyEdStrongAreas, def.earlyEdStrongAreas),
+        achievements: asStr(raw.achievements, def.achievements),
+        educationalTrips: asStr(raw.educationalTrips, def.educationalTrips),
+        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
         previousConclusionsStatus: asStr(
-          obj.previousConclusionsStatus,
+          raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
+        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'karta_informacyjna': {
@@ -309,27 +412,27 @@ function sanitizeSingleDocument(
         ...def,
         ...common,
         type: 'karta_informacyjna',
-        teacherName: asStr(obj.teacherName, def.teacherName),
-        period: asStr(obj.period, def.period),
-        totalHours: asStr(obj.totalHours, def.totalHours),
-        homeroomClass: asStr(obj.homeroomClass, def.homeroomClass),
-        subjectHours: sanitizeSubjectHoursRows(obj.subjectHours, def.subjectHours),
-        qualificationsStudies: asStr(obj.qualificationsStudies, def.qualificationsStudies),
+        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        period: asStr(raw.period, def.period, MAX_SHORT_LENGTH),
+        totalHours: asStr(raw.totalHours, def.totalHours, 64),
+        homeroomClass: asStr(raw.homeroomClass, def.homeroomClass, 64),
+        subjectHours: sanitizeSubjectHoursRows(raw.subjectHours, def.subjectHours),
+        qualificationsStudies: asStr(raw.qualificationsStudies, def.qualificationsStudies),
         qualificationsWorkshops: asStr(
-          obj.qualificationsWorkshops,
+          raw.qualificationsWorkshops,
           def.qualificationsWorkshops
         ),
         qualificationsMethodical: asStr(
-          obj.qualificationsMethodical,
+          raw.qualificationsMethodical,
           def.qualificationsMethodical
         ),
-        studentAchievements: asStr(obj.studentAchievements, def.studentAchievements),
-        tripsOrganization: asStr(obj.tripsOrganization, def.tripsOrganization),
-        didacticBaseEnrichment: asStr(obj.didacticBaseEnrichment, def.didacticBaseEnrichment),
-        statutoryActivities: asStr(obj.statutoryActivities, def.statutoryActivities),
-        directorTasks: sanitizeAdditionalTaskRows(obj.directorTasks, def.directorTasks),
+        studentAchievements: asStr(raw.studentAchievements, def.studentAchievements),
+        tripsOrganization: asStr(raw.tripsOrganization, def.tripsOrganization),
+        didacticBaseEnrichment: asStr(raw.didacticBaseEnrichment, def.didacticBaseEnrichment),
+        statutoryActivities: asStr(raw.statutoryActivities, def.statutoryActivities),
+        directorTasks: sanitizeAdditionalTaskRows(raw.directorTasks, def.directorTasks),
         teacherInitiativeTasks: sanitizeAdditionalTaskRows(
-          obj.teacherInitiativeTasks,
+          raw.teacherInitiativeTasks,
           def.teacherInitiativeTasks
         ),
       };
@@ -340,20 +443,20 @@ function sanitizeSingleDocument(
         ...def,
         ...common,
         type: 'podsumowanie_specjalisty',
-        semester: asSemester(obj.semester, def.semester),
+        semester: asSemester(raw.semester, def.semester),
         role: specialistRole,
-        specialistName: asStr(obj.specialistName, def.specialistName),
-        studentInfo: asStr(obj.studentInfo, def.studentInfo),
-        plannedTasks: asStr(obj.plannedTasks, def.plannedTasks),
-        tasksRealization: asStr(obj.tasksRealization, def.tasksRealization),
-        effects: asStr(obj.effects, def.effects),
-        conclusions: asStr(obj.conclusions, def.conclusions),
-        preventiveProgram: asStr(obj.preventiveProgram, def.preventiveProgram),
+        specialistName: asStr(raw.specialistName, def.specialistName, MAX_SHORT_LENGTH),
+        studentInfo: asStr(raw.studentInfo, def.studentInfo),
+        plannedTasks: asStr(raw.plannedTasks, def.plannedTasks),
+        tasksRealization: asStr(raw.tasksRealization, def.tasksRealization),
+        effects: asStr(raw.effects, def.effects),
+        conclusions: asStr(raw.conclusions, def.conclusions),
+        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
         previousConclusionsStatus: asStr(
-          obj.previousConclusionsStatus,
+          raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(obj.futureConclusions, def.futureConclusions),
+        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'uzasadnienie_nieklasyfikowania': {
@@ -363,14 +466,14 @@ function sanitizeSingleDocument(
         ...common,
         type: 'uzasadnienie_nieklasyfikowania',
         classificationPeriod: classPeriod,
-        attachmentNumber: asStr(obj.attachmentNumber, def.attachmentNumber),
-        studentName: asStr(obj.studentName, def.studentName),
-        className: asStr(obj.className, def.className),
-        subject: asStr(obj.subject, def.subject),
-        teacherName: asStr(obj.teacherName, def.teacherName),
-        absencePercent: asStr(obj.absencePercent, def.absencePercent),
+        attachmentNumber: asStr(raw.attachmentNumber, def.attachmentNumber, 64),
+        studentName: asStr(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
+        className: asStr(raw.className, def.className, 64),
+        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        absencePercent: asStr(raw.absencePercent, def.absencePercent, 64),
         additionalJustification: asStr(
-          obj.additionalJustification,
+          raw.additionalJustification,
           def.additionalJustification
         ),
       };
@@ -378,70 +481,70 @@ function sanitizeSingleDocument(
     case 'uzasadnienie_ndst': {
       const def = base as UzasadnienieNdstDoc;
       const completed =
-        obj.additionalTasksCompleted === 'TAK' || obj.additionalTasksCompleted === 'NIE'
-          ? obj.additionalTasksCompleted
+        raw.additionalTasksCompleted === 'TAK' || raw.additionalTasksCompleted === 'NIE'
+          ? raw.additionalTasksCompleted
           : '';
       const attended =
-        obj.remedialClassesAttended === 'TAK' ||
-        obj.remedialClassesAttended === 'NIE' ||
-        obj.remedialClassesAttended === 'RZADKO'
-          ? obj.remedialClassesAttended
+        raw.remedialClassesAttended === 'TAK' ||
+        raw.remedialClassesAttended === 'NIE' ||
+        raw.remedialClassesAttended === 'RZADKO'
+          ? raw.remedialClassesAttended
           : '';
       return {
         ...def,
         ...common,
         type: 'uzasadnienie_ndst',
         classificationPeriod: classPeriod,
-        attachmentNumber: asStr(obj.attachmentNumber, def.attachmentNumber),
-        studentName: asStr(obj.studentName, def.studentName),
-        className: asStr(obj.className, def.className),
-        subject: asStr(obj.subject, def.subject),
-        teacherName: asStr(obj.teacherName, def.teacherName),
-        educationStage: asStr(obj.educationStage, def.educationStage),
-        curriculumGaps: asStr(obj.curriculumGaps, def.curriculumGaps),
-        observations: asStringArray<NdstObservationKey>(obj.observations, def.observations),
+        attachmentNumber: asStr(raw.attachmentNumber, def.attachmentNumber, 64),
+        studentName: asStr(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
+        className: asStr(raw.className, def.className, 64),
+        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        educationStage: asStr(raw.educationStage, def.educationStage, MAX_SHORT_LENGTH),
+        curriculumGaps: asStr(raw.curriculumGaps, def.curriculumGaps),
+        observations: asStringArray<NdstObservationKey>(raw.observations, def.observations),
         teacherActions: asStringArray<NdstTeacherActionKey>(
-          obj.teacherActions,
+          raw.teacherActions,
           def.teacherActions
         ),
         improvementScheduleWhen: asStr(
-          obj.improvementScheduleWhen,
+          raw.improvementScheduleWhen,
           def.improvementScheduleWhen
         ),
         improvementScheduleForm: asStr(
-          obj.improvementScheduleForm,
+          raw.improvementScheduleForm,
           def.improvementScheduleForm
         ),
         additionalTasksExamples: asStr(
-          obj.additionalTasksExamples,
+          raw.additionalTasksExamples,
           def.additionalTasksExamples
         ),
         additionalTasksCompleted: completed,
-        remedialClassesWhat: asStr(obj.remedialClassesWhat, def.remedialClassesWhat),
+        remedialClassesWhat: asStr(raw.remedialClassesWhat, def.remedialClassesWhat),
         remedialClassesAttended: attended,
         remedialClassesNotAttendedReason: asStr(
-          obj.remedialClassesNotAttendedReason,
+          raw.remedialClassesNotAttendedReason,
           def.remedialClassesNotAttendedReason
         ),
-        parentsNotifiedDate: asStr(obj.parentsNotifiedDate, def.parentsNotifiedDate),
-        parentsInstructedDate: asStr(obj.parentsInstructedDate, def.parentsInstructedDate),
-        pedagogueNotifiedDate: asStr(obj.pedagogueNotifiedDate, def.pedagogueNotifiedDate),
+        parentsNotifiedDate: asStr(raw.parentsNotifiedDate, def.parentsNotifiedDate, 128),
+        parentsInstructedDate: asStr(raw.parentsInstructedDate, def.parentsInstructedDate, 128),
+        pedagogueNotifiedDate: asStr(raw.pedagogueNotifiedDate, def.pedagogueNotifiedDate, 128),
         otherTeacherActionsText: asStr(
-          obj.otherTeacherActionsText,
+          raw.otherTeacherActionsText,
           def.otherTeacherActionsText
         ),
-        parentsCooperation: asStr(obj.parentsCooperation, def.parentsCooperation),
+        parentsCooperation: asStr(raw.parentsCooperation, def.parentsCooperation),
         nextSemesterActions: asStringArray<NdstNextSemesterActionKey>(
-          obj.nextSemesterActions,
+          raw.nextSemesterActions,
           def.nextSemesterActions
         ),
-        nextSemesterOtherText: asStr(obj.nextSemesterOtherText, def.nextSemesterOtherText),
+        nextSemesterOtherText: asStr(raw.nextSemesterOtherText, def.nextSemesterOtherText),
       };
     }
   }
 }
 
-function sanitizeDocuments(
+export function sanitizeDocuments(
   docs: unknown,
   fallbackProfile: TeacherProfile = createDefaultProfile()
 ): ReportDocument[] {
@@ -457,10 +560,12 @@ function sanitizeDocuments(
   return result;
 }
 
-function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
+export function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
   const defaults = createDefaultProfile();
   const subjectsList = Array.isArray(raw.subjectsList)
-    ? raw.subjectsList.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    ? raw.subjectsList
+        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+        .map((s) => s.trim().slice(0, MAX_SHORT_LENGTH))
     : defaults.subjectsList;
 
   const classesList = Array.isArray(raw.classesList)
@@ -468,24 +573,40 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
         new Set(
           raw.classesList
             .filter((c): c is string => typeof c === 'string')
-            .map((c) => c.trim())
+            .map((c) => c.trim().slice(0, 64))
             .filter((c) => c.length > 0)
         )
       )
     : defaults.classesList;
 
+  const seenAssignmentIds = new Set<string>();
   let subjectAssignments: SubjectAssignment[];
   if (Array.isArray(raw.subjectAssignments)) {
     subjectAssignments = raw.subjectAssignments
-      .filter((a): a is SubjectAssignment => !!a && typeof a === 'object' && typeof a.subject === 'string')
-      .map((a) => ({
-        id: typeof a.id === 'string' && a.id ? a.id : createId(),
-        subject: a.subject,
-        classScope: typeof a.classScope === 'string' ? a.classScope : '',
-        programNumber: typeof a.programNumber === 'string' ? a.programNumber : '',
-        textbookNumber: typeof a.textbookNumber === 'string' ? a.textbookNumber : '',
-        textbookTitle: typeof a.textbookTitle === 'string' ? a.textbookTitle : '',
-      }));
+      .filter(
+        (a): a is SubjectAssignment =>
+          isPlainObject(a) && typeof (a as SubjectAssignment).subject === 'string'
+      )
+      .map((a) => {
+        let id =
+          typeof a.id === 'string' && a.id.trim()
+            ? a.id.trim().slice(0, MAX_SHORT_LENGTH)
+            : createId();
+        if (seenAssignmentIds.has(id)) id = createId();
+        seenAssignmentIds.add(id);
+
+        return {
+          id,
+          subject: a.subject.slice(0, MAX_SHORT_LENGTH),
+          classScope: typeof a.classScope === 'string' ? a.classScope.slice(0, MAX_SHORT_LENGTH) : '',
+          programNumber:
+            typeof a.programNumber === 'string' ? a.programNumber.slice(0, MAX_SHORT_LENGTH) : '',
+          textbookNumber:
+            typeof a.textbookNumber === 'string' ? a.textbookNumber.slice(0, MAX_SHORT_LENGTH) : '',
+          textbookTitle:
+            typeof a.textbookTitle === 'string' ? a.textbookTitle.slice(0, MAX_SHORT_LENGTH) : '',
+        };
+      });
   } else {
     subjectAssignments = subjectsList.map((subject) => ({
       id: createId(),
@@ -511,48 +632,51 @@ function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
   return {
     senderId:
       typeof raw.senderId === 'string' && raw.senderId.trim()
-        ? raw.senderId.trim()
+        ? raw.senderId.trim().slice(0, MAX_SHORT_LENGTH)
         : defaults.senderId,
-    fullName: typeof raw.fullName === 'string' ? raw.fullName : defaults.fullName,
-    schoolName: typeof raw.schoolName === 'string' ? raw.schoolName : defaults.schoolName,
-    schoolYear: typeof raw.schoolYear === 'string' ? raw.schoolYear : defaults.schoolYear,
-    defaultSemester: raw.defaultSemester === 'I' || raw.defaultSemester === 'II' ? raw.defaultSemester : defaults.defaultSemester,
+    fullName: asStr(raw.fullName, defaults.fullName, MAX_SHORT_LENGTH),
+    schoolName: asStr(raw.schoolName, defaults.schoolName, MAX_SHORT_LENGTH),
+    schoolYear: asStr(raw.schoolYear, defaults.schoolYear, 64),
+    defaultSemester:
+      raw.defaultSemester === 'I' || raw.defaultSemester === 'II'
+        ? raw.defaultSemester
+        : defaults.defaultSemester,
     periodPreset:
       raw.periodPreset === 'sem1' || raw.periodPreset === 'sem2' || raw.periodPreset === 'custom'
         ? raw.periodPreset
         : defaults.periodPreset,
-    periodText: typeof raw.periodText === 'string' ? raw.periodText : defaults.periodText,
-    homeroomClass: typeof raw.homeroomClass === 'string' ? raw.homeroomClass : defaults.homeroomClass,
+    periodText: asStr(raw.periodText, defaults.periodText, MAX_SHORT_LENGTH),
+    homeroomClass: asStr(raw.homeroomClass, defaults.homeroomClass, 64),
     classesList,
     subjectsList: derivedSubjectsList,
     subjectAssignments,
-    signatureDate: typeof raw.signatureDate === 'string' ? raw.signatureDate : defaults.signatureDate,
+    signatureDate: asStr(raw.signatureDate, defaults.signatureDate, 64),
   };
 }
 
-const VALID_DOC_TYPES = new Set([
-  'efekty_nauczania',
-  'zbiorcze_efekty',
-  'karta_informacyjna',
-  'podsumowanie_specjalisty',
-  'uzasadnienie_nieklasyfikowania',
-  'uzasadnienie_ndst',
-]);
-
-function isValidReportDocument(doc: unknown): doc is ReportDocument {
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
-  const candidate = doc as Partial<ReportDocument>;
-  return typeof candidate.type === 'string' && VALID_DOC_TYPES.has(candidate.type);
+export function isValidReportDocument(doc: unknown): doc is ReportDocument {
+  if (!isPlainObject(doc)) return false;
+  return typeof doc.type === 'string' && VALID_DOC_TYPES.has(doc.type);
 }
 
-function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] {
+export function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] {
   if (!Array.isArray(raw)) return [];
+  const seenPkgIds = new Set<string>();
+  const nowFallback = new Date().toISOString();
+
   return raw
-    .filter((item): item is Partial<TeacherSupervisionPackage> => !!item && typeof item === 'object')
+    .filter((item): item is Partial<TeacherSupervisionPackage> => isPlainObject(item))
     .map((item) => {
+      let id =
+        typeof item.id === 'string' && item.id.trim()
+          ? item.id.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId();
+      if (seenPkgIds.has(id)) id = createId();
+      seenPkgIds.add(id);
+
       const profile = sanitizeProfile(
-        item.teacherProfileSnapshot && typeof item.teacherProfileSnapshot === 'object'
-          ? item.teacherProfileSnapshot
+        isPlainObject(item.teacherProfileSnapshot)
+          ? (item.teacherProfileSnapshot as Partial<TeacherProfile>)
           : {}
       );
       const validDocs = Array.isArray(item.documents)
@@ -560,35 +684,29 @@ function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] 
         : [];
       const teacherKey =
         typeof item.teacherKey === 'string' && item.teacherKey.trim()
-          ? item.teacherKey.trim()
+          ? item.teacherKey.trim().slice(0, MAX_SHORT_LENGTH)
           : buildTeacherKey(profile, validDocs);
 
       return {
-        id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : createId(),
+        id,
         teacherKey,
         teacherName:
           typeof item.teacherName === 'string' && item.teacherName.trim()
-            ? item.teacherName.trim()
+            ? item.teacherName.trim().slice(0, MAX_SHORT_LENGTH)
             : profile.fullName,
         schoolName:
           typeof item.schoolName === 'string' && item.schoolName.trim()
-            ? item.schoolName.trim()
+            ? item.schoolName.trim().slice(0, MAX_SHORT_LENGTH)
             : profile.schoolName,
         homeroomClass:
           typeof item.homeroomClass === 'string'
-            ? item.homeroomClass
+            ? item.homeroomClass.slice(0, 64)
             : profile.homeroomClass,
-        exportedAt:
-          typeof item.exportedAt === 'string' && item.exportedAt.trim()
-            ? item.exportedAt
-            : new Date().toISOString(),
-        importedAt:
-          typeof item.importedAt === 'string' && item.importedAt.trim()
-            ? item.importedAt
-            : new Date().toISOString(),
+        exportedAt: sanitizeIsoDate(item.exportedAt, nowFallback),
+        importedAt: sanitizeIsoDate(item.importedAt, nowFallback),
         schoolYearFilter:
           typeof item.schoolYearFilter === 'string' && item.schoolYearFilter.trim()
-            ? item.schoolYearFilter
+            ? item.schoolYearFilter.slice(0, 64)
             : 'all',
         semesterFilter:
           item.semesterFilter === 'I' || item.semesterFilter === 'II'
@@ -601,45 +719,67 @@ function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] 
     .filter((pkg) => pkg.documents.length > 0);
 }
 
-function sanitizeSupervisionClassNotes(raw: unknown): Record<string, string> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+export function sanitizeSupervisionClassNotes(raw: unknown): Record<string, string> {
+  if (!isPlainObject(raw)) return {};
   const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof key === 'string' && typeof val === 'string' && val.trim().length > 0) {
-      result[key] = val;
+  for (const [key, val] of Object.entries(raw)) {
+    if (
+      typeof key === 'string' &&
+      !FORBIDDEN_RECORD_KEYS.has(key) &&
+      key.length <= MAX_SHORT_LENGTH &&
+      typeof val === 'string' &&
+      val.trim().length > 0
+    ) {
+      result[key] = val.slice(0, MAX_TEXT_LENGTH);
     }
   }
   return result;
 }
 
-const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
-const DB_NAME = 'esprawozdania_db';
-const DB_VERSION = 3;
-const STORE_META = 'meta';
-const STORE_DOCUMENTS = 'documents';
-const STORE_WNIOSKI = 'customWnioski';
-const STORE_TEMPLATES = 'customTemplates';
-const STORE_SUPERVISION_PACKAGES = 'supervisionPackages';
-
 export type StorageBackend = 'indexeddb' | 'memory';
-export type SaveStatus = 'saved' | 'saving' | 'error';
+export type SaveStatus = 'saved' | 'saving' | 'conflict' | 'error' | 'memory_only';
+export type LegacyMigrationStatus =
+  | 'none'
+  | 'migrated'
+  | 'corrupted'
+  | 'read_error'
+  | 'migration_write_failed';
+
+export type SaveResult =
+  | { ok: true; revision: number }
+  | {
+      ok: false;
+      reason: 'conflict' | 'error' | 'unavailable';
+      dbRevision?: number;
+      error?: string;
+    };
+
+export interface LoadAppStateResult {
+  state: AppState;
+  backend: StorageBackend;
+  legacyStatus: LegacyMigrationStatus;
+  revision: number;
+  dbReadError?: string;
+}
 
 interface MetaRecord<T = unknown> {
   key: string;
   value: T;
 }
 
-const BROADCAST_CHANNEL_NAME = 'esprawozdania';
 const TAB_INSTANCE_ID = createId();
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 let lastPersistedState: AppState | null = null;
-let writeQueue: Promise<boolean> = Promise.resolve(true);
-let debounceTimer: number | null = null;
+let currentKnownRevision = 0;
+let currentStorageBackend: StorageBackend = 'indexeddb';
+let writeQueue: Promise<SaveResult> = Promise.resolve({ ok: true, revision: 0 });
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingStateToSave: AppState | null = null;
 let currentSaveStatus: SaveStatus = 'saved';
+
 const saveStatusListeners = new Set<(status: SaveStatus) => void>();
-const crossTabListeners = new Set<() => void>();
+const crossTabListeners = new Set<(detail: { revision?: number }) => void>();
 let sharedBroadcastChannel: BroadcastChannel | null = null;
 
 function setSaveStatus(next: SaveStatus): void {
@@ -654,6 +794,14 @@ export function getSaveStatus(): SaveStatus {
   return currentSaveStatus;
 }
 
+export function getCurrentStorageBackend(): StorageBackend {
+  return currentStorageBackend;
+}
+
+export function getCurrentRevision(): number {
+  return currentKnownRevision;
+}
+
 export function subscribeSaveStatus(listener: (status: SaveStatus) => void): () => void {
   saveStatusListeners.add(listener);
   listener(currentSaveStatus);
@@ -663,17 +811,20 @@ export function subscribeSaveStatus(listener: (status: SaveStatus) => void): () 
 }
 
 function getBroadcastChannel(): BroadcastChannel | null {
-  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') {
-    return null;
-  }
+  const BC =
+    typeof globalThis !== 'undefined' && 'BroadcastChannel' in globalThis
+      ? globalThis.BroadcastChannel
+      : undefined;
+  if (!BC) return null;
+
   if (!sharedBroadcastChannel) {
     try {
-      sharedBroadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      sharedBroadcastChannel = new BC(BROADCAST_CHANNEL_NAME);
       sharedBroadcastChannel.onmessage = (event: MessageEvent) => {
-        const data = event.data as { type?: string; tabId?: string } | null;
+        const data = event.data as { type?: string; tabId?: string; revision?: number } | null;
         if (data?.type === 'state_saved' && data.tabId && data.tabId !== TAB_INSTANCE_ID) {
           for (const listener of crossTabListeners) {
-            listener();
+            listener({ revision: data.revision });
           }
         }
       };
@@ -684,13 +835,14 @@ function getBroadcastChannel(): BroadcastChannel | null {
   return sharedBroadcastChannel;
 }
 
-function notifyOtherTabsSaved(): void {
+export function notifyOtherTabsSaved(revision?: number): void {
   const ch = getBroadcastChannel();
   if (!ch) return;
   try {
     ch.postMessage({
       type: 'state_saved',
       tabId: TAB_INSTANCE_ID,
+      revision,
       timestamp: Date.now(),
     });
   } catch {
@@ -698,7 +850,9 @@ function notifyOtherTabsSaved(): void {
   }
 }
 
-export function subscribeCrossTabChanges(listener: () => void): () => void {
+export function subscribeCrossTabChanges(
+  listener: (detail: { revision?: number }) => void
+): () => void {
   getBroadcastChannel();
   crossTabListeners.add(listener);
   return () => {
@@ -733,6 +887,28 @@ function reorderByIds<T extends { id: string }>(items: T[], orderIds?: unknown):
   return ordered;
 }
 
+function getIndexedDbApi(): IDBFactory | null {
+  if (typeof globalThis !== 'undefined' && 'indexedDB' in globalThis && globalThis.indexedDB) {
+    return globalThis.indexedDB;
+  }
+  return null;
+}
+
+function getLocalStorageApi(): Storage | null {
+  try {
+    if (
+      typeof globalThis !== 'undefined' &&
+      'localStorage' in globalThis &&
+      globalThis.localStorage
+    ) {
+      return globalThis.localStorage;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function reqToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -749,14 +925,15 @@ function txDone(tx: IDBTransaction): Promise<void> {
 }
 
 function openDatabase(): Promise<IDBDatabase> {
-  if (typeof window === 'undefined' || !('indexedDB' in window) || !window.indexedDB) {
+  const idb = getIndexedDbApi();
+  if (!idb) {
     return Promise.reject(new Error('IndexedDB is not supported in this browser'));
   }
 
   if (dbPromise) return dbPromise;
 
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    const request = idb.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -804,41 +981,65 @@ function openDatabase(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function readLegacyLocalStorage(): AppState | null {
+type LegacyReadResult =
+  | { status: 'none' }
+  | { status: 'valid'; state: AppState }
+  | { status: 'corrupted' }
+  | { status: 'read_error' };
+
+function readLegacyLocalStorageDetailed(): LegacyReadResult {
+  let raw: string | null = null;
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return null;
+    const ls = getLocalStorageApi();
+    if (!ls) return { status: 'none' };
+    raw = ls.getItem(LEGACY_STORAGE_KEY);
+  } catch {
+    return { status: 'read_error' };
+  }
+
+  if (raw === null) return { status: 'none' };
+  if (!raw.trim()) return { status: 'corrupted' };
+
+  try {
     const parsed = JSON.parse(raw) as Partial<AppState>;
-    if (!parsed || typeof parsed !== 'object' || !parsed.profile || !Array.isArray(parsed.documents)) {
-      return null;
+    if (
+      !isPlainObject(parsed) ||
+      !isPlainObject(parsed.profile) ||
+      !Array.isArray(parsed.documents)
+    ) {
+      return { status: 'corrupted' };
     }
-    const profile = sanitizeProfile(parsed.profile);
+    const profile = sanitizeProfile(parsed.profile as Partial<TeacherProfile>);
     const documents = sanitizeDocuments(parsed.documents, profile);
     const activeId =
-      parsed.activeDocumentId && documents.some((d) => d.id === parsed.activeDocumentId)
+      typeof parsed.activeDocumentId === 'string' &&
+      documents.some((d) => d.id === parsed.activeDocumentId)
         ? parsed.activeDocumentId
         : documents[0]?.id ?? null;
 
     return {
-      version: parsed.version ?? 1,
-      profile,
-      documents,
-      activeDocumentId: activeId,
-      customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
-      customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
-      supervisionPackages: sanitizeSupervisionPackages(parsed.supervisionPackages),
-      supervisionClassNotes: sanitizeSupervisionClassNotes(parsed.supervisionClassNotes),
+      status: 'valid',
+      state: {
+        version: typeof parsed.version === 'number' && Number.isFinite(parsed.version) ? parsed.version : 1,
+        profile,
+        documents,
+        activeDocumentId: activeId,
+        customWnioski: sanitizeCustomWnioski(parsed.customWnioski),
+        customTemplates: sanitizeCustomTemplates(parsed.customTemplates),
+        supervisionPackages: sanitizeSupervisionPackages(parsed.supervisionPackages),
+        supervisionClassNotes: sanitizeSupervisionClassNotes(parsed.supervisionClassNotes),
+      },
     };
   } catch {
-    return null;
+    return { status: 'corrupted' };
   }
 }
 
 function clearLegacyLocalStorage(): void {
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    const ls = getLocalStorageApi();
+    if (ls) {
+      ls.removeItem(LEGACY_STORAGE_KEY);
     }
   } catch {
     // Ignore storage access errors
@@ -847,16 +1048,38 @@ function clearLegacyLocalStorage(): void {
 
 async function writeStateToDb(
   state: AppState,
-  options?: { replaceAll?: boolean }
-): Promise<boolean> {
-  try {
-    const replaceAll = options?.replaceAll || !lastPersistedState;
-    if (!replaceAll && lastPersistedState === state) {
-      return true;
-    }
-    const db = await openDatabase();
-    const prev = replaceAll ? null : lastPersistedState;
+  options?: { replaceAll?: boolean; forceOverwriteRevision?: boolean }
+): Promise<SaveResult> {
+  if (!getIndexedDbApi()) {
+    return { ok: false, reason: 'unavailable', error: 'IndexedDB niedostępne w przeglądarce.' };
+  }
 
+  let db: IDBDatabase;
+  try {
+    db = await openDatabase();
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'unavailable',
+      error: err instanceof Error ? err.message : 'Nie można otworzyć bazy IndexedDB.',
+    };
+  }
+
+  const replaceAll = Boolean(options?.replaceAll || !lastPersistedState);
+  if (
+    !replaceAll &&
+    !options?.forceOverwriteRevision &&
+    lastPersistedState === state &&
+    currentSaveStatus === 'saved'
+  ) {
+    return { ok: true, revision: currentKnownRevision };
+  }
+
+  let conflictInfo: { dbRevision: number } | null = null;
+  let committedNextRevision = 0;
+
+  try {
+    const prev = replaceAll ? null : lastPersistedState;
     const tx = db.transaction(
       [
         STORE_META,
@@ -873,273 +1096,458 @@ async function writeStateToDb(
     const templatesStore = tx.objectStore(STORE_TEMPLATES);
     const supervisionStore = tx.objectStore(STORE_SUPERVISION_PACKAGES);
 
-    // 1. Update metadata keys only when needed
-    if (!prev) {
-      metaStore.put({ key: 'initialized', value: true });
-      metaStore.put({ key: 'version', value: state.version });
-      metaStore.put({ key: 'profile', value: state.profile });
-      metaStore.put({ key: 'activeDocumentId', value: state.activeDocumentId });
-      metaStore.put({ key: 'documentOrder', value: state.documents.map((d) => d.id) });
-      metaStore.put({ key: 'customWnioskiOrder', value: state.customWnioski.map((w) => w.id) });
-      metaStore.put({ key: 'customTemplatesOrder', value: state.customTemplates.map((t) => t.id) });
-      metaStore.put({
-        key: 'supervisionPackageOrder',
-        value: state.supervisionPackages.map((p) => p.id),
-      });
-      metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
-    } else {
-      if (prev.version !== state.version) {
-        metaStore.put({ key: 'version', value: state.version });
-      }
-      if (prev.profile !== state.profile) {
-        metaStore.put({ key: 'profile', value: state.profile });
-      }
-      if (prev.activeDocumentId !== state.activeDocumentId) {
-        metaStore.put({ key: 'activeDocumentId', value: state.activeDocumentId });
-      }
-      const prevDocOrder = prev.documents.map((d) => d.id);
-      const nextDocOrder = state.documents.map((d) => d.id);
-      if (!arraysEqual(prevDocOrder, nextDocOrder)) {
-        metaStore.put({ key: 'documentOrder', value: nextDocOrder });
-      }
-      const prevWnioskiOrder = prev.customWnioski.map((w) => w.id);
-      const nextWnioskiOrder = state.customWnioski.map((w) => w.id);
-      if (!arraysEqual(prevWnioskiOrder, nextWnioskiOrder)) {
-        metaStore.put({ key: 'customWnioskiOrder', value: nextWnioskiOrder });
-      }
-      const prevTemplatesOrder = prev.customTemplates.map((t) => t.id);
-      const nextTemplatesOrder = state.customTemplates.map((t) => t.id);
-      if (!arraysEqual(prevTemplatesOrder, nextTemplatesOrder)) {
-        metaStore.put({ key: 'customTemplatesOrder', value: nextTemplatesOrder });
-      }
-      const prevPkgOrder = prev.supervisionPackages.map((p) => p.id);
-      const nextPkgOrder = state.supervisionPackages.map((p) => p.id);
-      if (!arraysEqual(prevPkgOrder, nextPkgOrder)) {
-        metaStore.put({ key: 'supervisionPackageOrder', value: nextPkgOrder });
-      }
-      if (prev.supervisionClassNotes !== state.supervisionClassNotes) {
-        metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
-      }
-    }
+    const revReq = metaStore.get('revision');
+    revReq.onsuccess = () => {
+      const rec = revReq.result as MetaRecord<number> | undefined;
+      const dbRevision =
+        typeof rec?.value === 'number' && Number.isInteger(rec.value) && rec.value >= 0
+          ? rec.value
+          : 0;
 
-    // 2. Sync documents store incrementally (or full replace)
-    if (!prev) {
-      docStore.clear();
-      for (const doc of state.documents) {
-        docStore.put(doc);
+      if (!options?.forceOverwriteRevision && dbRevision > currentKnownRevision) {
+        conflictInfo = { dbRevision };
+        try {
+          tx.abort();
+        } catch {
+          // Ignore abort errors
+        }
+        return;
       }
-    } else if (prev.documents !== state.documents) {
-      const prevMap = new Map(prev.documents.map((d) => [d.id, d]));
-      const nextIds = new Set(state.documents.map((d) => d.id));
-      for (const oldId of prevMap.keys()) {
-        if (!nextIds.has(oldId)) {
-          docStore.delete(oldId);
+
+      const nextRevision = Math.max(dbRevision, currentKnownRevision, 0) + 1;
+      committedNextRevision = nextRevision;
+
+      metaStore.put({ key: 'revision', value: nextRevision });
+
+      if (!prev) {
+        metaStore.put({ key: 'initialized', value: true });
+        metaStore.put({ key: 'version', value: state.version });
+        metaStore.put({ key: 'profile', value: state.profile });
+        metaStore.put({ key: 'activeDocumentId', value: state.activeDocumentId });
+        metaStore.put({ key: 'documentOrder', value: state.documents.map((d) => d.id) });
+        metaStore.put({ key: 'customWnioskiOrder', value: state.customWnioski.map((w) => w.id) });
+        metaStore.put({
+          key: 'customTemplatesOrder',
+          value: state.customTemplates.map((t) => t.id),
+        });
+        metaStore.put({
+          key: 'supervisionPackageOrder',
+          value: state.supervisionPackages.map((p) => p.id),
+        });
+        metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
+      } else {
+        if (prev.version !== state.version) {
+          metaStore.put({ key: 'version', value: state.version });
+        }
+        if (prev.profile !== state.profile) {
+          metaStore.put({ key: 'profile', value: state.profile });
+        }
+        if (prev.activeDocumentId !== state.activeDocumentId) {
+          metaStore.put({ key: 'activeDocumentId', value: state.activeDocumentId });
+        }
+        const prevDocOrder = prev.documents.map((d) => d.id);
+        const nextDocOrder = state.documents.map((d) => d.id);
+        if (!arraysEqual(prevDocOrder, nextDocOrder)) {
+          metaStore.put({ key: 'documentOrder', value: nextDocOrder });
+        }
+        const prevWnioskiOrder = prev.customWnioski.map((w) => w.id);
+        const nextWnioskiOrder = state.customWnioski.map((w) => w.id);
+        if (!arraysEqual(prevWnioskiOrder, nextWnioskiOrder)) {
+          metaStore.put({ key: 'customWnioskiOrder', value: nextWnioskiOrder });
+        }
+        const prevTemplatesOrder = prev.customTemplates.map((t) => t.id);
+        const nextTemplatesOrder = state.customTemplates.map((t) => t.id);
+        if (!arraysEqual(prevTemplatesOrder, nextTemplatesOrder)) {
+          metaStore.put({ key: 'customTemplatesOrder', value: nextTemplatesOrder });
+        }
+        const prevPkgOrder = prev.supervisionPackages.map((p) => p.id);
+        const nextPkgOrder = state.supervisionPackages.map((p) => p.id);
+        if (!arraysEqual(prevPkgOrder, nextPkgOrder)) {
+          metaStore.put({ key: 'supervisionPackageOrder', value: nextPkgOrder });
+        }
+        if (prev.supervisionClassNotes !== state.supervisionClassNotes) {
+          metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
         }
       }
-      for (const doc of state.documents) {
-        if (prevMap.get(doc.id) !== doc) {
+
+      if (!prev) {
+        docStore.clear();
+        for (const doc of state.documents) {
           docStore.put(doc);
         }
-      }
-    }
-
-    // 3. Sync customWnioski store incrementally (or full replace)
-    if (!prev) {
-      wnioskiStore.clear();
-      for (const entry of state.customWnioski) {
-        wnioskiStore.put(entry);
-      }
-    } else if (prev.customWnioski !== state.customWnioski) {
-      const prevMap = new Map(prev.customWnioski.map((w) => [w.id, w]));
-      const nextIds = new Set(state.customWnioski.map((w) => w.id));
-      for (const oldId of prevMap.keys()) {
-        if (!nextIds.has(oldId)) {
-          wnioskiStore.delete(oldId);
+      } else if (prev.documents !== state.documents) {
+        const prevMap = new Map(prev.documents.map((d) => [d.id, d]));
+        const nextIds = new Set(state.documents.map((d) => d.id));
+        for (const oldId of prevMap.keys()) {
+          if (!nextIds.has(oldId)) {
+            docStore.delete(oldId);
+          }
+        }
+        for (const doc of state.documents) {
+          if (prevMap.get(doc.id) !== doc) {
+            docStore.put(doc);
+          }
         }
       }
-      for (const entry of state.customWnioski) {
-        if (prevMap.get(entry.id) !== entry) {
+
+      if (!prev) {
+        wnioskiStore.clear();
+        for (const entry of state.customWnioski) {
           wnioskiStore.put(entry);
         }
-      }
-    }
-
-    // 4. Sync customTemplates store incrementally (or full replace)
-    if (!prev) {
-      templatesStore.clear();
-      for (const tpl of state.customTemplates) {
-        templatesStore.put(tpl);
-      }
-    } else if (prev.customTemplates !== state.customTemplates) {
-      const prevMap = new Map(prev.customTemplates.map((t) => [t.id, t]));
-      const nextIds = new Set(state.customTemplates.map((t) => t.id));
-      for (const oldId of prevMap.keys()) {
-        if (!nextIds.has(oldId)) {
-          templatesStore.delete(oldId);
+      } else if (prev.customWnioski !== state.customWnioski) {
+        const prevMap = new Map(prev.customWnioski.map((w) => [w.id, w]));
+        const nextIds = new Set(state.customWnioski.map((w) => w.id));
+        for (const oldId of prevMap.keys()) {
+          if (!nextIds.has(oldId)) {
+            wnioskiStore.delete(oldId);
+          }
+        }
+        for (const entry of state.customWnioski) {
+          if (prevMap.get(entry.id) !== entry) {
+            wnioskiStore.put(entry);
+          }
         }
       }
-      for (const tpl of state.customTemplates) {
-        if (prevMap.get(tpl.id) !== tpl) {
+
+      if (!prev) {
+        templatesStore.clear();
+        for (const tpl of state.customTemplates) {
           templatesStore.put(tpl);
         }
-      }
-    }
-
-    // 5. Sync supervisionPackages store incrementally (or full replace)
-    if (!prev) {
-      supervisionStore.clear();
-      for (const pkg of state.supervisionPackages) {
-        supervisionStore.put(pkg);
-      }
-    } else if (prev.supervisionPackages !== state.supervisionPackages) {
-      const prevMap = new Map(prev.supervisionPackages.map((p) => [p.id, p]));
-      const nextIds = new Set(state.supervisionPackages.map((p) => p.id));
-      for (const oldId of prevMap.keys()) {
-        if (!nextIds.has(oldId)) {
-          supervisionStore.delete(oldId);
+      } else if (prev.customTemplates !== state.customTemplates) {
+        const prevMap = new Map(prev.customTemplates.map((t) => [t.id, t]));
+        const nextIds = new Set(state.customTemplates.map((t) => t.id));
+        for (const oldId of prevMap.keys()) {
+          if (!nextIds.has(oldId)) {
+            templatesStore.delete(oldId);
+          }
+        }
+        for (const tpl of state.customTemplates) {
+          if (prevMap.get(tpl.id) !== tpl) {
+            templatesStore.put(tpl);
+          }
         }
       }
-      for (const pkg of state.supervisionPackages) {
-        if (prevMap.get(pkg.id) !== pkg) {
+
+      if (!prev) {
+        supervisionStore.clear();
+        for (const pkg of state.supervisionPackages) {
           supervisionStore.put(pkg);
         }
+      } else if (prev.supervisionPackages !== state.supervisionPackages) {
+        const prevMap = new Map(prev.supervisionPackages.map((p) => [p.id, p]));
+        const nextIds = new Set(state.supervisionPackages.map((p) => p.id));
+        for (const oldId of prevMap.keys()) {
+          if (!nextIds.has(oldId)) {
+            supervisionStore.delete(oldId);
+          }
+        }
+        for (const pkg of state.supervisionPackages) {
+          if (prevMap.get(pkg.id) !== pkg) {
+            supervisionStore.put(pkg);
+          }
+        }
       }
-    }
+    };
 
     await txDone(tx);
+    currentKnownRevision = committedNextRevision;
     lastPersistedState = state;
-    return true;
-  } catch {
-    return false;
+    currentStorageBackend = 'indexeddb';
+    return { ok: true, revision: committedNextRevision };
+  } catch (err) {
+    if (conflictInfo) {
+      return {
+        ok: false,
+        reason: 'conflict',
+        dbRevision: (conflictInfo as { dbRevision: number }).dbRevision,
+      };
+    }
+    return {
+      ok: false,
+      reason: 'error',
+      error: err instanceof Error ? err.message : 'Błąd transakcji zapisu w IndexedDB.',
+    };
   }
 }
 
-export async function loadAppState(): Promise<{
-  state: AppState;
-  backend: StorageBackend;
+export async function readIndexedDbStateOnly(): Promise<{
+  found: boolean;
+  state?: AppState;
+  revision: number;
 }> {
+  const db = await openDatabase();
+  const tx = db.transaction(
+    [
+      STORE_META,
+      STORE_DOCUMENTS,
+      STORE_WNIOSKI,
+      STORE_TEMPLATES,
+      STORE_SUPERVISION_PACKAGES,
+    ],
+    'readonly'
+  );
+  const [metaRecords, rawDocs, rawWnioski, rawTemplates, rawPackages] = await Promise.all([
+    reqToPromise<MetaRecord[]>(tx.objectStore(STORE_META).getAll()),
+    reqToPromise<AppState['documents']>(tx.objectStore(STORE_DOCUMENTS).getAll()),
+    reqToPromise<CustomWniosekEntry[]>(tx.objectStore(STORE_WNIOSKI).getAll()),
+    reqToPromise<CustomTemplateEntry[]>(tx.objectStore(STORE_TEMPLATES).getAll()),
+    reqToPromise<TeacherSupervisionPackage[]>(
+      tx.objectStore(STORE_SUPERVISION_PACKAGES).getAll()
+    ),
+  ]);
+  await txDone(tx);
+
+  const metaMap = new Map<string, unknown>(metaRecords.map((m) => [m.key, m.value]));
+  const hasExistingDbData =
+    metaMap.get('initialized') === true ||
+    metaMap.has('profile') ||
+    rawDocs.length > 0 ||
+    rawPackages.length > 0;
+
+  if (!hasExistingDbData) {
+    return { found: false, revision: 0 };
+  }
+
+  const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
+  const profile = sanitizeProfile(isPlainObject(rawProfile) ? rawProfile : {});
+  const orderedDocs = sanitizeDocuments(
+    reorderByIds(rawDocs, metaMap.get('documentOrder')),
+    profile
+  );
+  const orderedWnioski = sanitizeCustomWnioski(
+    reorderByIds(rawWnioski, metaMap.get('customWnioskiOrder'))
+  );
+  const orderedTemplates = sanitizeCustomTemplates(
+    reorderByIds(rawTemplates, metaMap.get('customTemplatesOrder'))
+  );
+  const orderedPackages = sanitizeSupervisionPackages(
+    reorderByIds(rawPackages, metaMap.get('supervisionPackageOrder'))
+  );
+  const rawActiveId = metaMap.get('activeDocumentId');
+  const activeDocumentId =
+    typeof rawActiveId === 'string' && orderedDocs.some((d) => d.id === rawActiveId)
+      ? rawActiveId
+      : orderedDocs[0]?.id ?? null;
+
+  const rawRevision = metaMap.get('revision');
+  const revision =
+    typeof rawRevision === 'number' && Number.isInteger(rawRevision) && rawRevision >= 1
+      ? rawRevision
+      : 1;
+
+  const hydrated: AppState = {
+    version:
+      typeof metaMap.get('version') === 'number' && Number.isFinite(metaMap.get('version'))
+        ? (metaMap.get('version') as number)
+        : 1,
+    profile,
+    documents: orderedDocs,
+    activeDocumentId,
+    customWnioski: orderedWnioski,
+    customTemplates: orderedTemplates,
+    supervisionPackages: orderedPackages,
+    supervisionClassNotes: sanitizeSupervisionClassNotes(metaMap.get('supervisionClassNotes')),
+  };
+
+  return { found: true, state: hydrated, revision };
+}
+
+export async function loadAppState(): Promise<LoadAppStateResult> {
   try {
-    const db = await openDatabase();
-    const tx = db.transaction(
-      [
-        STORE_META,
-        STORE_DOCUMENTS,
-        STORE_WNIOSKI,
-        STORE_TEMPLATES,
-        STORE_SUPERVISION_PACKAGES,
-      ],
-      'readonly'
-    );
-    const [metaRecords, rawDocs, rawWnioski, rawTemplates, rawPackages] = await Promise.all([
-      reqToPromise<MetaRecord[]>(tx.objectStore(STORE_META).getAll()),
-      reqToPromise<AppState['documents']>(tx.objectStore(STORE_DOCUMENTS).getAll()),
-      reqToPromise<CustomWniosekEntry[]>(tx.objectStore(STORE_WNIOSKI).getAll()),
-      reqToPromise<CustomTemplateEntry[]>(tx.objectStore(STORE_TEMPLATES).getAll()),
-      reqToPromise<TeacherSupervisionPackage[]>(
-        tx.objectStore(STORE_SUPERVISION_PACKAGES).getAll()
-      ),
-    ]);
-    await txDone(tx);
+    const dbRead = await readIndexedDbStateOnly();
+    const legacy = readLegacyLocalStorageDetailed();
 
-    const metaMap = new Map<string, unknown>(metaRecords.map((m) => [m.key, m.value]));
-    const hasExistingDbData =
-      metaMap.get('initialized') === true ||
-      metaMap.has('profile') ||
-      rawDocs.length > 0 ||
-      rawPackages.length > 0;
+    if (dbRead.found && dbRead.state) {
+      currentKnownRevision = dbRead.revision;
+      lastPersistedState = dbRead.state;
+      currentStorageBackend = 'indexeddb';
+      setSaveStatus('saved');
 
-    if (hasExistingDbData) {
-      const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
-      const profile = sanitizeProfile(rawProfile ?? {});
-      const orderedDocs = sanitizeDocuments(
-        reorderByIds(rawDocs, metaMap.get('documentOrder')),
-        profile
-      );
-      const orderedWnioski = sanitizeCustomWnioski(
-        reorderByIds(rawWnioski, metaMap.get('customWnioskiOrder'))
-      );
-      const orderedTemplates = sanitizeCustomTemplates(
-        reorderByIds(rawTemplates, metaMap.get('customTemplatesOrder'))
-      );
-      const orderedPackages = sanitizeSupervisionPackages(
-        reorderByIds(rawPackages, metaMap.get('supervisionPackageOrder'))
-      );
-      const rawActiveId = metaMap.get('activeDocumentId');
-      const activeDocumentId =
-        typeof rawActiveId === 'string' && orderedDocs.some((d) => d.id === rawActiveId)
-          ? rawActiveId
-          : orderedDocs[0]?.id ?? null;
-
-      const hydrated: AppState = {
-        version: typeof metaMap.get('version') === 'number' ? (metaMap.get('version') as number) : 1,
-        profile,
-        documents: orderedDocs,
-        activeDocumentId,
-        customWnioski: orderedWnioski,
-        customTemplates: orderedTemplates,
-        supervisionPackages: orderedPackages,
-        supervisionClassNotes: sanitizeSupervisionClassNotes(
-          metaMap.get('supervisionClassNotes')
-        ),
+      // Clear only valid migrated legacy key once DB is already populated & verified;
+      // preserve corrupted legacy data so user is not misled or deprived of manual recovery.
+      if (legacy.status === 'valid') {
+        clearLegacyLocalStorage();
+      }
+      return {
+        state: dbRead.state,
+        backend: 'indexeddb',
+        legacyStatus:
+          legacy.status === 'corrupted' || legacy.status === 'read_error'
+            ? legacy.status
+            : 'none',
+        revision: dbRead.revision,
       };
-
-      lastPersistedState = hydrated;
-      clearLegacyLocalStorage();
-      return { state: hydrated, backend: 'indexeddb' };
     }
 
-    // One-time migration from legacy localStorage (if present) or fresh initialization
-    const legacyState = readLegacyLocalStorage();
-    const initialState = legacyState ?? createInitialAppState();
-    await saveAppStateImmediate(initialState, { replaceAll: true });
-    clearLegacyLocalStorage();
-    return { state: initialState, backend: 'indexeddb' };
-  } catch {
-    // Graceful fallback if IndexedDB is blocked in a restricted browser environment
-    setSaveStatus('error');
-    const legacy = readLegacyLocalStorage();
+    if (legacy.status === 'valid') {
+      const saveRes = await saveAppStateImmediate(legacy.state, {
+        replaceAll: true,
+        forceOverwriteRevision: true,
+      });
+      if (saveRes.ok) {
+        clearLegacyLocalStorage();
+        return {
+          state: legacy.state,
+          backend: 'indexeddb',
+          legacyStatus: 'migrated',
+          revision: saveRes.revision,
+        };
+      }
+      currentStorageBackend = 'memory';
+      setSaveStatus('memory_only');
+      return {
+        state: legacy.state,
+        backend: 'memory',
+        legacyStatus: 'migration_write_failed',
+        revision: 0,
+      };
+    }
+
+    if (legacy.status === 'corrupted' || legacy.status === 'read_error') {
+      // Do not overwrite DB or delete legacy key when legacy read failed or is corrupted
+      currentKnownRevision = 0;
+      lastPersistedState = null;
+      currentStorageBackend = 'indexeddb';
+      setSaveStatus('error');
+      return {
+        state: createInitialAppState(),
+        backend: 'indexeddb',
+        legacyStatus: legacy.status,
+        revision: 0,
+      };
+    }
+
+    const initialState = createInitialAppState();
+    const saveRes = await saveAppStateImmediate(initialState, {
+      replaceAll: true,
+      forceOverwriteRevision: true,
+    });
+    if (saveRes.ok) {
+      return {
+        state: initialState,
+        backend: 'indexeddb',
+        legacyStatus: 'none',
+        revision: saveRes.revision,
+      };
+    }
+
+    currentStorageBackend = 'memory';
+    setSaveStatus('memory_only');
     return {
-      state: legacy ?? createInitialAppState(),
+      state: initialState,
       backend: 'memory',
+      legacyStatus: 'none',
+      revision: 0,
     };
+  } catch {
+    currentStorageBackend = 'memory';
+    setSaveStatus('memory_only');
+    const legacy = readLegacyLocalStorageDetailed();
+    return {
+      state: legacy.status === 'valid' ? legacy.state : createInitialAppState(),
+      backend: 'memory',
+      legacyStatus:
+        legacy.status === 'valid'
+          ? 'migration_write_failed'
+          : legacy.status === 'corrupted' || legacy.status === 'read_error'
+            ? legacy.status
+            : 'none',
+      revision: 0,
+      dbReadError: 'Nie udało się odczytać lokalnej bazy IndexedDB.',
+    };
+  }
+}
+
+export async function reloadAppStateFromDb(): Promise<
+  | { ok: true; state: AppState; revision: number }
+  | { ok: false; error: string }
+> {
+  try {
+    const dbRead = await readIndexedDbStateOnly();
+    if (!dbRead.found || !dbRead.state) {
+      return { ok: false, error: 'W bazie IndexedDB nie znaleziono zapisanej sesji.' };
+    }
+    if (debounceTimer !== null) {
+      globalThis.clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    pendingStateToSave = null;
+    currentKnownRevision = dbRead.revision;
+    lastPersistedState = dbRead.state;
+    currentStorageBackend = 'indexeddb';
+    setSaveStatus('saved');
+    return { ok: true, state: dbRead.state, revision: dbRead.revision };
+  } catch {
+    return { ok: false, error: 'Nie udało się ponownie odczytać bazy IndexedDB.' };
   }
 }
 
 export function saveAppStateImmediate(
   state: AppState,
-  options?: { replaceAll?: boolean }
-): Promise<boolean> {
+  options?: { replaceAll?: boolean; forceOverwriteRevision?: boolean }
+): Promise<SaveResult> {
   if (debounceTimer !== null) {
-    window.clearTimeout(debounceTimer);
+    globalThis.clearTimeout(debounceTimer);
     debounceTimer = null;
   }
   pendingStateToSave = null;
-  setSaveStatus('saving');
 
-  const task = writeQueue.then(async () => {
-    const ok = await writeStateToDb(state, options);
-    if (ok) {
+  if (currentSaveStatus === 'conflict' && !options?.forceOverwriteRevision) {
+    return Promise.resolve({
+      ok: false,
+      reason: 'conflict',
+      dbRevision: currentKnownRevision,
+    });
+  }
+
+  if (currentStorageBackend === 'indexeddb') {
+    setSaveStatus('saving');
+  }
+
+  const task = writeQueue.then(async (): Promise<SaveResult> => {
+    const res = await writeStateToDb(state, options);
+    if (res.ok) {
       setSaveStatus('saved');
-      notifyOtherTabsSaved();
+      notifyOtherTabsSaved(res.revision);
+      return res;
+    }
+    if (res.reason === 'conflict') {
+      setSaveStatus('conflict');
+    } else if (res.reason === 'unavailable' || currentStorageBackend === 'memory') {
+      currentStorageBackend = 'memory';
+      setSaveStatus('memory_only');
     } else {
       setSaveStatus('error');
     }
-    return ok;
+    return res;
   });
-  writeQueue = task.catch(() => {
-    setSaveStatus('error');
-    return false;
+
+  writeQueue = task.catch((): SaveResult => {
+    setSaveStatus(currentStorageBackend === 'memory' ? 'memory_only' : 'error');
+    return { ok: false, reason: 'error', error: 'Nieoczekiwany błąd kolejki zapisu.' };
   });
+
   return task;
 }
 
 export function scheduleSaveAppState(state: AppState, delayMs = 250): void {
+  if (currentSaveStatus === 'conflict') {
+    // Do not overwrite conflicting newer revision in IndexedDB
+    return;
+  }
   pendingStateToSave = state;
+  if (currentStorageBackend === 'memory') {
+    setSaveStatus('memory_only');
+    return;
+  }
+
   setSaveStatus('saving');
   if (debounceTimer !== null) {
-    window.clearTimeout(debounceTimer);
+    globalThis.clearTimeout(debounceTimer);
   }
-  debounceTimer = window.setTimeout(() => {
+  debounceTimer = globalThis.setTimeout(() => {
     debounceTimer = null;
     if (pendingStateToSave) {
       const target = pendingStateToSave;
@@ -1151,8 +1559,11 @@ export function scheduleSaveAppState(state: AppState, delayMs = 250): void {
 
 export function flushPendingAppStateSave(): void {
   if (debounceTimer !== null) {
-    window.clearTimeout(debounceTimer);
+    globalThis.clearTimeout(debounceTimer);
     debounceTimer = null;
+  }
+  if (currentStorageBackend === 'memory' || currentSaveStatus === 'conflict') {
+    return;
   }
   if (pendingStateToSave) {
     const target = pendingStateToSave;
@@ -1161,29 +1572,56 @@ export function flushPendingAppStateSave(): void {
   }
 }
 
-export async function resetAllStoredState(freshState: AppState): Promise<void> {
+export async function retryIndexedDbPersistence(state: AppState): Promise<SaveResult> {
+  currentStorageBackend = 'indexeddb';
+  dbPromise = null;
+  const res = await saveAppStateImmediate(state, {
+    replaceAll: true,
+    forceOverwriteRevision: true,
+  });
+  if (res.ok) {
+    const legacy = readLegacyLocalStorageDetailed();
+    if (legacy.status === 'valid') {
+      clearLegacyLocalStorage();
+    }
+  }
+  return res;
+}
+
+export async function resetAllStoredState(freshState: AppState): Promise<SaveResult> {
   clearLegacyLocalStorage();
   lastPersistedState = null;
-  await saveAppStateImmediate(freshState, { replaceAll: true });
+  return saveAppStateImmediate(freshState, {
+    replaceAll: true,
+    forceOverwriteRevision: true,
+  });
 }
 
 export async function exportRawIndexedDbBackup(): Promise<boolean> {
   try {
-    const { state } = await loadAppState();
-    exportStateAsJson(state);
-    return true;
+    const dbRead = await readIndexedDbStateOnly();
+    if (dbRead.found && dbRead.state) {
+      return exportStateAsJson(dbRead.state);
+    }
   } catch {
-    return false;
+    // Fall back to legacy localStorage check without modifying storage
   }
+  const legacy = readLegacyLocalStorageDetailed();
+  if (legacy.status === 'valid') {
+    return exportStateAsJson(legacy.state);
+  }
+  return false;
 }
 
 export async function wipeDatabaseForRecovery(): Promise<void> {
   clearLegacyLocalStorage();
   lastPersistedState = null;
+  currentKnownRevision = 0;
   dbPromise = null;
-  if (typeof window !== 'undefined' && 'indexedDB' in window && window.indexedDB) {
+  const idb = getIndexedDbApi();
+  if (idb) {
     await new Promise<void>((resolve) => {
-      const req = window.indexedDB.deleteDatabase(DB_NAME);
+      const req = idb.deleteDatabase(DB_NAME);
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
       req.onblocked = () => resolve();
@@ -1191,52 +1629,183 @@ export async function wipeDatabaseForRecovery(): Promise<void> {
   }
 }
 
-export function exportStateAsJson(state: AppState): void {
+export function resetStorageRuntimeForTests(): void {
+  if (debounceTimer !== null) {
+    globalThis.clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  pendingStateToSave = null;
+  lastPersistedState = null;
+  currentKnownRevision = 0;
+  currentStorageBackend = 'indexeddb';
+  currentSaveStatus = 'saved';
+  writeQueue = Promise.resolve({ ok: true, revision: 0 });
+  dbPromise = null;
+  if (sharedBroadcastChannel) {
+    try {
+      sharedBroadcastChannel.close();
+    } catch {
+      // Ignore close errors
+    }
+    sharedBroadcastChannel = null;
+  }
+  saveStatusListeners.clear();
+  crossTabListeners.clear();
+}
+
+export function exportStateAsJson(state: AppState): boolean {
   const payload = {
     app: 'E-Sprawozdania',
     exportedAt: new Date().toISOString(),
     ...state,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const dateTag = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `sprawozdania-kopia-${dateTag}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return triggerJsonDownload(payload, `sprawozdania-kopia-${dateTag}.json`);
 }
 
-export function validateAndParseImportedJson(jsonText: string): {
-  ok: true;
-  state: AppState;
-} | {
-  ok: false;
-  error: string;
-} {
+export function validateAndParseImportedJson(jsonText: string):
+  | { ok: true; state: AppState }
+  | { ok: false; error: string } {
   try {
-    const data = JSON.parse(jsonText) as Partial<AppState>;
-    if (!data || typeof data !== 'object') {
+    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    if (!isPlainObject(data)) {
       return { ok: false, error: 'Plik nie zawiera prawidłowego obiektu JSON.' };
     }
-    if (!data.profile || typeof data.profile !== 'object') {
+    if (data.app !== undefined && data.app !== 'E-Sprawozdania') {
+      return {
+        ok: false,
+        error: 'Wybrany plik nie jest kopią aplikacji E-Sprawozdania (niezgodne pole „app”).',
+      };
+    }
+    if (data.kind === 'phrases_bundle') {
+      return {
+        ok: false,
+        error:
+          'To jest plik bazy wniosków i szablonów. Zaimportuj go w zakładce „Wnioski i szablony” -> „Udostępnianie”.',
+      };
+    }
+    if (data.kind === 'supervision_package') {
+      return {
+        ok: false,
+        error:
+          'To jest paczka sprawozdań dla dyrektora. Zaimportuj ją w panelu „Nadzór dyrektora”.',
+      };
+    }
+    if (data.kind !== undefined && data.kind !== 'full_backup') {
+      return { ok: false, error: 'Nieznany typ pliku kopii JSON.' };
+    }
+    if (
+      data.version !== undefined &&
+      (typeof data.version !== 'number' || !Number.isFinite(data.version) || data.version < 1)
+    ) {
+      return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
+    }
+
+    if (!isPlainObject(data.profile)) {
       return { ok: false, error: 'Brak sekcji profilu nauczyciela (profile) w pliku.' };
     }
+    if (
+      data.profile.subjectAssignments !== undefined &&
+      !Array.isArray(data.profile.subjectAssignments)
+    ) {
+      return {
+        ok: false,
+        error: 'Sekcja przypisań przedmiotów w profilu ma nieprawidłowy format.',
+      };
+    }
+    if (Array.isArray(data.profile.subjectAssignments)) {
+      const dupAssign = findDuplicateExplicitId(data.profile.subjectAssignments);
+      if (dupAssign) {
+        return {
+          ok: false,
+          error: 'Wykryto zduplikowane identyfikatory w przypisaniach przedmiotów profilu.',
+        };
+      }
+    }
+
     if (!Array.isArray(data.documents)) {
       return { ok: false, error: 'Brak listy dokumentów (documents) w pliku.' };
     }
 
-    const validRawDocs = data.documents.filter(isValidReportDocument);
-    if (data.documents.length > 0 && validRawDocs.length === 0) {
-      return { ok: false, error: 'Żaden z dokumentów w pliku nie ma prawidłowego typu dokumentu.' };
+    const hasInvalidDoc = data.documents.some((doc) => !isValidReportDocument(doc));
+    if (hasInvalidDoc) {
+      return {
+        ok: false,
+        error:
+          'Co najmniej jeden dokument w pliku ma nieznany typ lub uszkodzoną strukturę.',
+      };
     }
 
-    const profile = sanitizeProfile(data.profile);
-    const sanitizedDocuments = sanitizeDocuments(validRawDocs, profile);
+    const dupDocs = findDuplicateExplicitId(data.documents, [
+      'rows',
+      'subjectHours',
+      'directorTasks',
+      'teacherInitiativeTasks',
+    ]);
+    if (dupDocs) {
+      return {
+        ok: false,
+        error:
+          dupDocs.kind === 'top'
+            ? 'Wykryto zduplikowane identyfikatory dokumentów w pliku.'
+            : 'Wykryto zduplikowane identyfikatory wierszy wewnątrz dokumentu.',
+      };
+    }
+
+    if (data.customWnioski !== undefined) {
+      if (!Array.isArray(data.customWnioski)) {
+        return { ok: false, error: 'Lista własnych wniosków (customWnioski) ma błędny format.' };
+      }
+      if (findDuplicateExplicitId(data.customWnioski)) {
+        return {
+          ok: false,
+          error: 'Wykryto zduplikowane identyfikatory w kolekcji własnych wniosków.',
+        };
+      }
+    }
+
+    if (data.customTemplates !== undefined) {
+      if (!Array.isArray(data.customTemplates)) {
+        return {
+          ok: false,
+          error: 'Lista szablonów własnych (customTemplates) ma błędny format.',
+        };
+      }
+      if (findDuplicateExplicitId(data.customTemplates)) {
+        return {
+          ok: false,
+          error: 'Wykryto zduplikowane identyfikatory w kolekcji szablonów własnych.',
+        };
+      }
+    }
+
+    if (data.supervisionPackages !== undefined) {
+      if (!Array.isArray(data.supervisionPackages)) {
+        return {
+          ok: false,
+          error: 'Lista pakietów nadzoru (supervisionPackages) ma błędny format.',
+        };
+      }
+      if (findDuplicateExplicitId(data.supervisionPackages, ['documents'])) {
+        return {
+          ok: false,
+          error: 'Wykryto zduplikowane identyfikatory w kolekcji pakietów nadzoru.',
+        };
+      }
+    }
+
+    if (data.supervisionClassNotes !== undefined && !isPlainObject(data.supervisionClassNotes)) {
+      return {
+        ok: false,
+        error: 'Notatki klasowe nadzoru (supervisionClassNotes) mają błędny format.',
+      };
+    }
+
+    const profile = sanitizeProfile(data.profile as Partial<TeacherProfile>);
+    const sanitizedDocuments = sanitizeDocuments(data.documents, profile);
     const activeDocumentId =
-      data.activeDocumentId && sanitizedDocuments.some((d) => d.id === data.activeDocumentId)
+      typeof data.activeDocumentId === 'string' &&
+      sanitizedDocuments.some((d) => d.id === data.activeDocumentId)
         ? data.activeDocumentId
         : sanitizedDocuments[0]?.id ?? null;
 
@@ -1254,7 +1823,10 @@ export function validateAndParseImportedJson(jsonText: string): {
       },
     };
   } catch {
-    return { ok: false, error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.' };
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
   }
 }
 
@@ -1270,10 +1842,15 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
     } {
   try {
     const raw = JSON.parse(jsonText) as Record<string, unknown>;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (!isPlainObject(raw)) {
       return { ok: false, error: 'Wybrany plik nie zawiera prawidłowego obiektu JSON.' };
     }
-
+    if (raw.app !== undefined && raw.app !== 'E-Sprawozdania') {
+      return {
+        ok: false,
+        error: 'Wybrany plik nie pochodzi z aplikacji E-Sprawozdania.',
+      };
+    }
     if (raw.kind === 'phrases_bundle') {
       return {
         ok: false,
@@ -1281,11 +1858,24 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
           'To jest plik bazy wniosków i szablonów, a nie paczka sprawozdań nauczyciela do nadzoru.',
       };
     }
+    if (
+      raw.kind !== undefined &&
+      raw.kind !== 'supervision_package' &&
+      raw.kind !== 'full_backup'
+    ) {
+      return { ok: false, error: 'Nieznany typ pliku JSON.' };
+    }
+    if (
+      raw.version !== undefined &&
+      (typeof raw.version !== 'number' || !Number.isFinite(raw.version) || raw.version < 1)
+    ) {
+      return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
+    }
 
     const isDedicated = raw.kind === 'supervision_package';
     const rawProfile = isDedicated ? raw.teacherProfileSnapshot : raw.profile;
 
-    if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+    if (!isPlainObject(rawProfile)) {
       return {
         ok: false,
         error:
@@ -1296,9 +1886,21 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
     if (!Array.isArray(raw.documents)) {
       return { ok: false, error: 'Plik nie zawiera listy sprawozdań (documents).' };
     }
+    if (raw.documents.some((doc) => !isValidReportDocument(doc))) {
+      return {
+        ok: false,
+        error: 'Wskazana paczka zawiera dokument o nieprawidłowym typie lub strukturze.',
+      };
+    }
+    if (findDuplicateExplicitId(raw.documents)) {
+      return {
+        ok: false,
+        error: 'Wykryto zduplikowane identyfikatory dokumentów w paczce nadzoru.',
+      };
+    }
 
     const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>);
-    const validDocs = sanitizeDocuments(raw.documents.filter(isValidReportDocument), profile);
+    const validDocs = sanitizeDocuments(raw.documents, profile);
     if (validDocs.length === 0) {
       return {
         ok: false,
@@ -1308,7 +1910,7 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
 
     const teacherKey =
       typeof raw.teacherKey === 'string' && raw.teacherKey.trim()
-        ? raw.teacherKey.trim()
+        ? raw.teacherKey.trim().slice(0, MAX_SHORT_LENGTH)
         : buildTeacherKey(profile, validDocs);
 
     const teacherName =
@@ -1327,20 +1929,21 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
     const semesterFilter: 'all' | SemesterType =
       raw.semesterFilter === 'I' || raw.semesterFilter === 'II' ? raw.semesterFilter : 'all';
 
+    const nowFallback = new Date().toISOString();
     const pkg: TeacherSupervisionPackage = {
-      id: typeof raw.packageId === 'string' && raw.packageId.trim() ? raw.packageId.trim() : createId(),
+      id:
+        typeof raw.packageId === 'string' && raw.packageId.trim()
+          ? raw.packageId.trim().slice(0, MAX_SHORT_LENGTH)
+          : createId(),
       teacherKey,
-      teacherName: teacherName.trim(),
-      schoolName: profile.schoolName.trim(),
-      homeroomClass: profile.homeroomClass.trim(),
-      exportedAt:
-        typeof raw.exportedAt === 'string' && raw.exportedAt.trim()
-          ? raw.exportedAt
-          : new Date().toISOString(),
-      importedAt: new Date().toISOString(),
+      teacherName: teacherName.trim().slice(0, MAX_SHORT_LENGTH),
+      schoolName: profile.schoolName.trim().slice(0, MAX_SHORT_LENGTH),
+      homeroomClass: profile.homeroomClass.trim().slice(0, 64),
+      exportedAt: sanitizeIsoDate(raw.exportedAt, nowFallback),
+      importedAt: nowFallback,
       schoolYearFilter:
         typeof raw.schoolYearFilter === 'string' && raw.schoolYearFilter.trim()
-          ? raw.schoolYearFilter
+          ? raw.schoolYearFilter.slice(0, 64)
           : 'all',
       semesterFilter,
       teacherProfileSnapshot: profile,
@@ -1375,7 +1978,7 @@ export function exportPhrasesAsJson(
   customWnioski: CustomWniosekEntry[],
   customTemplates: CustomTemplateEntry[],
   scope: PhrasesExportScope = 'all'
-): void {
+): boolean {
   const wnioskiToExport = scope === 'szablony' ? [] : customWnioski;
   const templatesToExport = scope === 'wnioski' ? [] : customTemplates;
   const payload: SharedPhrasesBundle = {
@@ -1386,11 +1989,6 @@ export function exportPhrasesAsJson(
     customWnioski: wnioskiToExport,
     customTemplates: templatesToExport,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: 'application/json;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const dateTag = new Date().toISOString().slice(0, 10);
   const prefix =
     scope === 'wnioski'
@@ -1398,12 +1996,7 @@ export function exportPhrasesAsJson(
       : scope === 'szablony'
         ? 'sprawozdania-szablony'
         : 'sprawozdania-wnioski-i-szablony';
-  a.href = url;
-  a.download = `${prefix}-${dateTag}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return triggerJsonDownload(payload, `${prefix}-${dateTag}.json`);
 }
 
 export function validateAndParseSharedPhrasesJson(jsonText: string):
@@ -1419,8 +2012,34 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
     } {
   try {
     const data = JSON.parse(jsonText) as Record<string, unknown>;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    if (!isPlainObject(data)) {
       return { ok: false, error: 'Plik nie zawiera prawidłowego obiektu JSON.' };
+    }
+    if (data.app !== undefined && data.app !== 'E-Sprawozdania') {
+      return {
+        ok: false,
+        error: 'Wybrany plik nie pochodzi z aplikacji E-Sprawozdania.',
+      };
+    }
+    if (data.kind === 'supervision_package') {
+      return {
+        ok: false,
+        error:
+          'To jest paczka sprawozdań dla dyrektora, a nie pakiet wniosków i szablonów.',
+      };
+    }
+    if (
+      data.kind !== undefined &&
+      data.kind !== 'phrases_bundle' &&
+      data.kind !== 'full_backup'
+    ) {
+      return { ok: false, error: 'Nieznany typ pliku JSON.' };
+    }
+    if (
+      data.version !== undefined &&
+      (typeof data.version !== 'number' || !Number.isFinite(data.version) || data.version < 1)
+    ) {
+      return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
     }
 
     const hasWnioskiArray = Array.isArray(data.customWnioski);
@@ -1431,6 +2050,25 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
         ok: false,
         error:
           'Wybrany plik JSON nie zawiera list „customWnioski” ani „customTemplates”. Upewnij się, że wskazano plik wyeksportowany z programu E-Sprawozdania.',
+      };
+    }
+    if (data.customWnioski !== undefined && !hasWnioskiArray) {
+      return { ok: false, error: 'Pole „customWnioski” ma nieprawidłowy format.' };
+    }
+    if (data.customTemplates !== undefined && !hasTemplatesArray) {
+      return { ok: false, error: 'Pole „customTemplates” ma nieprawidłowy format.' };
+    }
+
+    if (hasWnioskiArray && findDuplicateExplicitId(data.customWnioski as unknown[])) {
+      return {
+        ok: false,
+        error: 'Wykryto zduplikowane identyfikatory na liście własnych wniosków.',
+      };
+    }
+    if (hasTemplatesArray && findDuplicateExplicitId(data.customTemplates as unknown[])) {
+      return {
+        ok: false,
+        error: 'Wykryto zduplikowane identyfikatory na liście szablonów własnych.',
       };
     }
 

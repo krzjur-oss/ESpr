@@ -26,6 +26,8 @@ export interface PhrasesImportPayload {
 }
 
 export interface PhrasesImportSummary {
+  ok: boolean;
+  error?: string;
   addedWnioski: number;
   addedTemplates: number;
   skippedDuplicates: number;
@@ -37,7 +39,7 @@ interface SharePhrasesModalProps {
   customWnioski: CustomWniosekEntry[];
   customTemplates: CustomTemplateEntry[];
   onClose: () => void;
-  onImportPhrases: (payload: PhrasesImportPayload) => PhrasesImportSummary;
+  onImportPhrases: (payload: PhrasesImportPayload) => Promise<PhrasesImportSummary>;
 }
 
 export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
@@ -54,11 +56,13 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
   const [exportWnioski, setExportWnioski] = useState(true);
   const [exportTemplates, setExportTemplates] = useState(true);
   const [exportDoneMessage, setExportDoneMessage] = useState<string | null>(null);
+  const [exportErrorMessage, setExportErrorMessage] = useState<string | null>(null);
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [isApplyingImport, setIsApplyingImport] = useState(false);
   const [parsedData, setParsedData] = useState<{
     customWnioski: CustomWniosekEntry[];
     customTemplates: CustomTemplateEntry[];
@@ -75,8 +79,10 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     setExportWnioski(customWnioski.length > 0);
     setExportTemplates(customTemplates.length > 0);
     setExportDoneMessage(null);
+    setExportErrorMessage(null);
     setSelectedFileName(null);
     setParseError(null);
+    setIsApplyingImport(false);
     setParsedData(null);
     setImportWnioski(true);
     setImportTemplates(true);
@@ -102,7 +108,12 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     ) {
       scope = 'szablony';
     }
-    exportPhrasesAsJson(customWnioski, customTemplates, scope);
+    const ok = exportPhrasesAsJson(customWnioski, customTemplates, scope);
+    if (!ok) {
+      setExportDoneMessage(null);
+      setExportErrorMessage('Nie udało się zainicjować pobierania pliku JSON w przeglądarce.');
+      return;
+    }
 
     const parts: string[] = [];
     if (scope !== 'szablony' && customWnioski.length > 0) {
@@ -111,6 +122,7 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     if (scope !== 'wnioski' && customTemplates.length > 0) {
       parts.push(`szablony własne (${customTemplates.length})`);
     }
+    setExportErrorMessage(null);
     setExportDoneMessage(`Pobrano plik JSON zawierający: ${parts.join(' oraz ')}.`);
   };
 
@@ -154,16 +166,28 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     ((importWnioski && parsedData.customWnioski.length > 0) ||
       (importTemplates && parsedData.customTemplates.length > 0));
 
-  const handleApplyImport = () => {
-    if (!parsedData || !canApplyImport) return;
-    const summary = onImportPhrases({
-      incomingWnioski: parsedData.customWnioski,
-      incomingTemplates: parsedData.customTemplates,
-      includeWnioski: importWnioski && parsedData.customWnioski.length > 0,
-      includeTemplates: importTemplates && parsedData.customTemplates.length > 0,
-      mode: importStrategy,
-    });
-    setImportResult(summary);
+  const handleApplyImport = async () => {
+    if (!parsedData || !canApplyImport || isApplyingImport) return;
+    setIsApplyingImport(true);
+    setParseError(null);
+    try {
+      const summary = await onImportPhrases({
+        incomingWnioski: parsedData.customWnioski,
+        incomingTemplates: parsedData.customTemplates,
+        includeWnioski: importWnioski && parsedData.customWnioski.length > 0,
+        includeTemplates: importTemplates && parsedData.customTemplates.length > 0,
+        mode: importStrategy,
+      });
+      if (summary.ok) {
+        setImportResult(summary);
+      } else {
+        setParseError(
+          summary.error || 'Nie udało się trwale zapisać zaimportowanych wpisów.'
+        );
+      }
+    } finally {
+      setIsApplyingImport(false);
+    }
   };
 
   return (
@@ -317,6 +341,13 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
                       </p>
                     </div>
                   </label>
+                </div>
+              )}
+
+              {exportErrorMessage && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3.5 text-xs text-red-900">
+                  <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+                  <span>{exportErrorMessage}</span>
                 </div>
               )}
 
@@ -532,12 +563,12 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
             !importResult && (
               <button
                 type="button"
-                disabled={!canApplyImport}
-                onClick={handleApplyImport}
+                disabled={!canApplyImport || isApplyingImport}
+                onClick={() => void handleApplyImport()}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
               >
                 <Upload className="w-3.5 h-3.5" />
-                <span>Zaimportuj wybrane</span>
+                <span>{isApplyingImport ? 'Zapisywanie…' : 'Zaimportuj wybrane'}</span>
               </button>
             )
           )}
