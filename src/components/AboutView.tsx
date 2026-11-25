@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BookOpen,
   Check,
+  ChevronDown,
+  ChevronRight,
   Database,
   FileCheck2,
   GraduationCap,
+  History,
   Info,
   Mail,
   Printer,
@@ -12,8 +15,9 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
+import { APP_RELEASE_DATE, APP_VERSION, CHANGELOG_ENTRIES } from '../data/changelog';
 
-export type AboutSection = 'info' | 'regulamin' | 'licencja';
+export type AboutSection = 'info' | 'changelog' | 'regulamin' | 'licencja';
 
 interface AboutViewProps {
   activeSection: AboutSection;
@@ -24,6 +28,22 @@ export const AboutView: React.FC<AboutViewProps> = ({
   activeSection,
   onChangeSection,
 }) => {
+  const [expandedVersions, setExpandedVersions] = useState<Set<string>>(() => {
+    const latest = CHANGELOG_ENTRIES[0]?.version;
+    return latest ? new Set([latest]) : new Set();
+  });
+
+  const toggleChangelogVersion = (version: string) => {
+    setExpandedVersions((prev) => {
+      const next = new Set(prev);
+      if (next.has(version)) {
+        next.delete(version);
+      } else {
+        next.add(version);
+      }
+      return next;
+    });
+  };
   return (
     <div className="mx-auto max-w-4xl px-4 md:px-8 py-8">
       {/* Header */}
@@ -32,7 +52,8 @@ export const AboutView: React.FC<AboutViewProps> = ({
           O programie, regulamin i licencja
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja <span className="font-mono-tabular font-medium">1.0</span>) · Bezpłatne narzędzie dla nauczycieli, specjalistów i placówek oświatowych.
+          E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja{' '}
+          <span className="font-mono-tabular font-medium">{APP_VERSION}</span>) · Bezpłatne narzędzie dla nauczycieli, specjalistów i placówek oświatowych.
         </p>
 
         {/* Sub-navigation */}
@@ -54,6 +75,20 @@ export const AboutView: React.FC<AboutViewProps> = ({
           >
             <Info className="w-3.5 h-3.5" />
             <span>Informacje o programie</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSection === 'changelog'}
+            onClick={() => onChangeSection('changelog')}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold transition-colors cursor-pointer ${
+              activeSection === 'changelog'
+                ? 'bg-white text-blue-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Historia zmian</span>
           </button>
           <button
             type="button"
@@ -113,30 +148,30 @@ export const AboutView: React.FC<AboutViewProps> = ({
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <FileCheck2 className="w-4 h-4 text-blue-900 shrink-0" />
-                  <span>4 typy szkolnych dokumentów</span>
+                  <span>6 typów szkolnych dokumentów</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Karty efektów nauczania, zbiorcze sprawozdania koordynatorów (z automatycznym zliczaniem ocen i podstawy programowej z kart przedmiotowych), karty informacyjne nauczyciela oraz podsumowania dla 6 ról specjalistów i komórek szkoły.
+                  Karty efektów nauczania, zbiorcze sprawozdania koordynatorów, karty informacyjne nauczyciela, podsumowania dla 6 ról specjalistów oraz oficjalne załączniki klasyfikacyjne: uzasadnienie nieklasyfikowania (I półrocze / roczne) i uzasadnienie oceny niedostatecznej.
                 </p>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <BookOpen className="w-4 h-4 text-blue-900 shrink-0" />
-                  <span>Stałe programy, archiwum i baza wniosków</span>
+                  <span>Stałe programy, archiwum, wnioski i szablony</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Stałe przypisanie przedmiotów do numeru programu i podręcznika w Profilu, archiwum dokumentów według lat szkolnych z przenoszeniem wybranych kart na kolejny rok oraz wbudowana baza gotowych i własnych wniosków do pracy.
+                  Przypisanie programów i podręczników w Profilu z rozwijanymi podpowiedziami, sortowanie i filtrowanie archiwum według lat szkolnych, przenoszenie kart na nowy rok oraz baza gotowych wniosków i własnych szablonów z wymianą JSON.
                 </p>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Printer className="w-4 h-4 text-blue-900 shrink-0" />
-                  <span>Podgląd A4 i czysty wydruk PDF</span>
+                  <span>Podgląd A4 i szybki wydruk kompletu</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Podgląd arkusza A4 na żywo podczas pisania oraz dedykowany tryb drukowania pojedynczej karty lub kompletu dokumentów z wybranego roku szkolnego bez elementów interfejsu.
+                  Podgląd arkusza A4 na żywo oraz drukowanie pojedynczej karty albo zaznaczonego kompletu dokumentów z wybranego roku szkolnego jednym kliknięciem bez elementów interfejsu.
                 </p>
               </div>
 
@@ -170,7 +205,9 @@ export const AboutView: React.FC<AboutViewProps> = ({
               </div>
               <div className="border-b border-slate-100 pb-2.5">
                 <dt className="text-xs font-medium text-slate-500">Wersja aplikacji</dt>
-                <dd className="mt-0.5 font-mono-tabular text-slate-900">1.0 (listopad 2026)</dd>
+                <dd className="mt-0.5 font-mono-tabular text-slate-900">
+                  {APP_VERSION} ({APP_RELEASE_DATE})
+                </dd>
               </div>
               <div className="border-b border-slate-100 pb-2.5">
                 <dt className="text-xs font-medium text-slate-500">Przechowywanie danych</dt>
@@ -206,6 +243,118 @@ export const AboutView: React.FC<AboutViewProps> = ({
         </div>
       )}
 
+      {/* SECTION 1b: Changelog */}
+      {activeSection === 'changelog' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Historia zmian (Changelog)
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-600">
+                Aktualna wersja programu:{' '}
+                <strong className="font-mono-tabular text-slate-900">v{APP_VERSION}</strong> · Najnowsze zmiany są rozwinięte domyślnie, starsze wydania możesz rozwinąć kliknięciem.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedVersions(new Set(CHANGELOG_ENTRIES.map((entry) => entry.version)))
+                }
+                className="font-medium text-blue-900 hover:underline cursor-pointer"
+              >
+                Rozwiń wszystkie
+              </button>
+              <span className="text-slate-300" aria-hidden="true">|</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const latest = CHANGELOG_ENTRIES[0]?.version;
+                  setExpandedVersions(latest ? new Set([latest]) : new Set());
+                }}
+                className="font-medium text-slate-600 hover:text-slate-900 hover:underline cursor-pointer"
+              >
+                Tylko najnowsze
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {CHANGELOG_ENTRIES.map((entry, index) => {
+              const isLatest = index === 0;
+              const isExpanded = expandedVersions.has(entry.version);
+              return (
+                <section
+                  key={entry.version}
+                  className={`rounded-xl border transition-colors ${
+                    isLatest
+                      ? 'border-blue-300 bg-white'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={isExpanded}
+                    onClick={() => toggleChangelogVersion(entry.version)}
+                    className="w-full flex items-start justify-between gap-4 px-5 py-4 text-left hover:bg-slate-50/70 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-blue-900 mt-1 shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-slate-400 mt-1 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-xs">
+                          <span className="font-mono-tabular font-bold text-blue-900">
+                            Wersja {entry.version}
+                          </span>
+                          <span className="text-slate-300" aria-hidden="true">·</span>
+                          <span className="font-mono-tabular text-slate-500">{entry.date}</span>
+                          {isLatest && (
+                            <>
+                              <span className="text-slate-300" aria-hidden="true">·</span>
+                              <span className="font-semibold text-emerald-700">
+                                Najnowsze wydanie
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <h3 className="mt-1 text-sm font-semibold text-slate-900">
+                          {entry.title}
+                        </h3>
+                        {!isExpanded && (
+                          <p className="mt-0.5 text-xs text-slate-500 truncate">
+                            {entry.summary}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-medium text-slate-500 shrink-0 pt-0.5">
+                      {isExpanded ? 'Zwiń' : 'Rozwiń'}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="border-t border-slate-100 px-5 pb-5 pt-3.5 pl-12">
+                      <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                        {entry.summary}
+                      </p>
+                      <ul className="list-disc pl-4 space-y-1.5 text-xs text-slate-700 leading-relaxed">
+                        {entry.changes.map((change, cIdx) => (
+                          <li key={cIdx}>{change}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* SECTION 2: Regulamin i Polityka Prywatności */}
       {activeSection === 'regulamin' && (
         <article className="rounded-xl border border-slate-200 bg-white p-6 md:p-8 space-y-6 text-sm text-slate-700 leading-relaxed">
@@ -214,7 +363,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
               Regulamin i Polityka Prywatności aplikacji „E-Sprawozdania — Kreator Sprawozdań Szkolnych”
             </h2>
             <p className="mt-1 text-xs text-slate-500 font-mono-tabular">
-              Wersja 1.0 · obowiązuje od 24.11.2026 r.
+              Wersja {APP_VERSION} · obowiązuje od 24.11.2026 r.
             </p>
           </div>
 
@@ -356,7 +505,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
               Wolna Licencja Domowo-Edukacyjna (Zastrzeżona) — WLDE
             </p>
             <p className="mt-2 text-xs text-slate-600">
-              <strong>Projekt:</strong> E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja <span className="font-mono-tabular">1.0</span> i wyższe)
+              <strong>Projekt:</strong> E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja <span className="font-mono-tabular">{APP_VERSION}</span>)
             </p>
             <p className="mt-1 text-xs text-slate-600">
               <strong>Właściciel praw autorskich i twórca:</strong> mgr Krzysztof Jureczek · Copyright © 2026 Krzysztof Jureczek. Wszelkie prawa zastrzeżone.

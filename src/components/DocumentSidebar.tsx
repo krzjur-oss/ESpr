@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  ClassificationPeriod,
   DOCUMENT_TYPE_LABELS,
   DocumentType,
   ReportDocument,
@@ -43,7 +44,11 @@ interface DocumentSidebarProps {
   onSelectDocument: (id: string) => void;
   onAddDocument: (
     type: DocumentType,
-    options?: { specialistRole?: SpecialistRole; coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna' }
+    options?: {
+      specialistRole?: SpecialistRole;
+      coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna';
+      classificationPeriod?: ClassificationPeriod;
+    }
   ) => void;
   onDuplicateDocument: (id: string) => void;
   onRequestDeleteDocument: (doc: ReportDocument) => void;
@@ -101,7 +106,11 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
 
   const handleCreate = (
     type: DocumentType,
-    options?: { specialistRole?: SpecialistRole; coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna' }
+    options?: {
+      specialistRole?: SpecialistRole;
+      coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna';
+      classificationPeriod?: ClassificationPeriod;
+    }
   ) => {
     onAddDocument(type, options);
     setShowNewMenu(false);
@@ -257,6 +266,45 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
                   {SPECIALIST_ROLE_LABELS[role]}
                 </button>
               ))}
+            </div>
+
+            <div className="border-t border-slate-100 my-1 pt-1">
+              <p className="px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                5. Załączniki klasyfikacyjne (NKL / NDST):
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCreate('uzasadnienie_nieklasyfikowania', {
+                    classificationPeriod: 'srodroczne',
+                  })
+                }
+                className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-900 transition-colors cursor-pointer"
+              >
+                5a. Uzasadnienie nieklasyfikowania (I półrocze)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCreate('uzasadnienie_nieklasyfikowania', {
+                    classificationPeriod: 'roczne',
+                  })
+                }
+                className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-900 transition-colors cursor-pointer"
+              >
+                5b. Uzasadnienie nieklasyfikowania (roczne)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCreate('uzasadnienie_ndst', {
+                    classificationPeriod: 'srodroczne',
+                  })
+                }
+                className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-900 transition-colors cursor-pointer"
+              >
+                6. Uzasadnienie oceny niedostatecznej
+              </button>
             </div>
           </div>
         )}

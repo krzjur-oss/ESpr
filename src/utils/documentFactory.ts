@@ -1,5 +1,6 @@
 import {
   AppState,
+  ClassificationPeriod,
   DOCUMENT_TYPE_LABELS,
   DocumentType,
   EfektyNauczaniaDoc,
@@ -11,6 +12,8 @@ import {
   SpecialistRole,
   SubjectAssignment,
   TeacherProfile,
+  UzasadnienieNdstDoc,
+  UzasadnienieNieklasyfikowaniaDoc,
   ZbiorczeEfektyDoc,
   ZbiorczeRow,
 } from '../types/reports';
@@ -241,12 +244,91 @@ export function createPodsumowanieSpecjalistyDoc(
   };
 }
 
+export function createUzasadnienieNieklasyfikowaniaDoc(
+  profile: TeacherProfile,
+  classificationPeriod: ClassificationPeriod = 'srodroczne',
+  schoolYearOverride?: string
+): UzasadnienieNieklasyfikowaniaDoc {
+  const now = new Date().toISOString();
+  const subject =
+    profile.subjectAssignments?.[0]?.subject ?? profile.subjectsList[0] ?? '';
+  const className = profile.classesList[0] ?? '';
+  const periodLabel = classificationPeriod === 'roczne' ? 'roczne' : 'I półrocze';
+
+  return {
+    id: createId(),
+    type: 'uzasadnienie_nieklasyfikowania',
+    title: `Uzasadnienie NKL (${periodLabel}) · ${subject || 'Przedmiot'}`,
+    createdAt: now,
+    updatedAt: now,
+    schoolName: profile.schoolName,
+    schoolYear: schoolYearOverride ?? profile.schoolYear,
+    classificationPeriod,
+    attachmentNumber: '',
+    studentName: '',
+    className,
+    subject,
+    teacherName: profile.fullName,
+    absencePercent: '',
+    additionalJustification: '',
+    signatureDate: profile.signatureDate || getTodayPolishDate(),
+  };
+}
+
+export function createUzasadnienieNdstDoc(
+  profile: TeacherProfile,
+  classificationPeriod: ClassificationPeriod = 'srodroczne',
+  schoolYearOverride?: string
+): UzasadnienieNdstDoc {
+  const now = new Date().toISOString();
+  const subject =
+    profile.subjectAssignments?.[0]?.subject ?? profile.subjectsList[0] ?? '';
+  const className = profile.classesList[0] ?? '';
+  const periodLabel = classificationPeriod === 'roczne' ? 'roczna' : 'I półrocze';
+
+  return {
+    id: createId(),
+    type: 'uzasadnienie_ndst',
+    title: `Uzasadnienie NDST (${periodLabel}) · ${subject || 'Przedmiot'}`,
+    createdAt: now,
+    updatedAt: now,
+    schoolName: profile.schoolName,
+    schoolYear: schoolYearOverride ?? profile.schoolYear,
+    classificationPeriod,
+    attachmentNumber: '',
+    studentName: '',
+    className,
+    subject,
+    teacherName: profile.fullName,
+    educationStage: 'drugiego etapu kształcenia',
+    curriculumGaps: '',
+    observations: [],
+    teacherActions: [],
+    improvementScheduleWhen: '',
+    improvementScheduleForm: '',
+    additionalTasksExamples: '',
+    additionalTasksCompleted: '',
+    remedialClassesWhat: '',
+    remedialClassesAttended: '',
+    remedialClassesNotAttendedReason: '',
+    parentsNotifiedDate: '',
+    parentsInstructedDate: '',
+    pedagogueNotifiedDate: '',
+    otherTeacherActionsText: '',
+    parentsCooperation: '',
+    nextSemesterActions: [],
+    nextSemesterOtherText: '',
+    signatureDate: profile.signatureDate || getTodayPolishDate(),
+  };
+}
+
 export function createDocumentByType(
   type: DocumentType,
   profile: TeacherProfile,
   options?: {
     specialistRole?: SpecialistRole;
     coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna';
+    classificationPeriod?: ClassificationPeriod;
     schoolYear?: string;
   }
 ): ReportDocument {
@@ -270,6 +352,18 @@ export function createDocumentByType(
         options?.specialistRole ?? 'pedagog_psycholog',
         options?.schoolYear
       );
+    case 'uzasadnienie_nieklasyfikowania':
+      return createUzasadnienieNieklasyfikowaniaDoc(
+        profile,
+        options?.classificationPeriod ?? 'srodroczne',
+        options?.schoolYear
+      );
+    case 'uzasadnienie_ndst':
+      return createUzasadnienieNdstDoc(
+        profile,
+        options?.classificationPeriod ?? 'srodroczne',
+        options?.schoolYear
+      );
   }
 }
 
@@ -287,6 +381,10 @@ export function clearDocumentFields(doc: ReportDocument, profile: TeacherProfile
   const fresh = createDocumentByType(doc.type, profile, {
     specialistRole: doc.type === 'podsumowanie_specjalisty' ? doc.role : undefined,
     coordinatorMode: doc.type === 'zbiorcze_efekty' ? doc.mode : undefined,
+    classificationPeriod:
+      doc.type === 'uzasadnienie_nieklasyfikowania' || doc.type === 'uzasadnienie_ndst'
+        ? doc.classificationPeriod
+        : undefined,
     schoolYear: doc.schoolYear,
   });
   fresh.id = doc.id;
@@ -389,17 +487,52 @@ export function cloneDocumentsForNewSchoolYear(
       return clone;
     }
 
-    // podsumowanie_specjalisty
-    clone.semester = options.targetSemester;
+    if (clone.type === 'podsumowanie_specjalisty') {
+      clone.semester = options.targetSemester;
+      if (options.mode === 'clean_base') {
+        const prevFuture = clone.futureConclusions.trim();
+        clone.tasksRealization = '';
+        clone.effects = '';
+        clone.conclusions = '';
+        clone.preventiveProgram = '';
+        clone.previousConclusionsStatus =
+          options.carryOverConclusions && prevFuture ? prevFuture : '';
+        clone.futureConclusions = '';
+      }
+      return clone;
+    }
+
+    if (clone.type === 'uzasadnienie_nieklasyfikowania') {
+      if (options.mode === 'clean_base') {
+        clone.attachmentNumber = '';
+        clone.studentName = '';
+        clone.absencePercent = '';
+        clone.additionalJustification = '';
+      }
+      return clone;
+    }
+
+    // uzasadnienie_ndst
     if (options.mode === 'clean_base') {
-      const prevFuture = clone.futureConclusions.trim();
-      clone.tasksRealization = '';
-      clone.effects = '';
-      clone.conclusions = '';
-      clone.preventiveProgram = '';
-      clone.previousConclusionsStatus =
-        options.carryOverConclusions && prevFuture ? prevFuture : '';
-      clone.futureConclusions = '';
+      clone.attachmentNumber = '';
+      clone.studentName = '';
+      clone.curriculumGaps = '';
+      clone.observations = [];
+      clone.teacherActions = [];
+      clone.improvementScheduleWhen = '';
+      clone.improvementScheduleForm = '';
+      clone.additionalTasksExamples = '';
+      clone.additionalTasksCompleted = '';
+      clone.remedialClassesWhat = '';
+      clone.remedialClassesAttended = '';
+      clone.remedialClassesNotAttendedReason = '';
+      clone.parentsNotifiedDate = '';
+      clone.parentsInstructedDate = '';
+      clone.pedagogueNotifiedDate = '';
+      clone.otherTeacherActionsText = '';
+      clone.parentsCooperation = '';
+      clone.nextSemesterActions = [];
+      clone.nextSemesterOtherText = '';
     }
     return clone;
   });

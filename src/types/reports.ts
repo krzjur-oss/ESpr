@@ -1,10 +1,14 @@
 export type SemesterType = 'I' | 'II';
 
+export type ClassificationPeriod = 'srodroczne' | 'roczne';
+
 export type DocumentType =
   | 'efekty_nauczania'
   | 'zbiorcze_efekty'
   | 'karta_informacyjna'
-  | 'podsumowanie_specjalisty';
+  | 'podsumowanie_specjalisty'
+  | 'uzasadnienie_nieklasyfikowania'
+  | 'uzasadnienie_ndst';
 
 export type CurriculumStatus = 'na_biezaco' | 'opoznienie' | 'wyprzedzenie';
 
@@ -162,11 +166,108 @@ export interface PodsumowanieSpecjalistyDoc {
   signatureDate: string;
 }
 
+export interface UzasadnienieNieklasyfikowaniaDoc {
+  id: string;
+  type: 'uzasadnienie_nieklasyfikowania';
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  schoolName: string;
+  schoolYear: string;
+  classificationPeriod: ClassificationPeriod;
+  attachmentNumber: string;
+  studentName: string;
+  className: string;
+  subject: string;
+  teacherName: string;
+  absencePercent: string;
+  additionalJustification: string;
+  signatureDate: string;
+}
+
+export type NdstObservationKey =
+  | 'czeste_nieobecnosci'
+  | 'unikanie_prac_pisemnych'
+  | 'niewykonywanie_prac_domowych'
+  | 'brak_zeszytu'
+  | 'brak_pracy_na_lekcji'
+  | 'nieopanowanie_wymagan_pisemnych'
+  | 'brak_aktywnego_udzialu'
+  | 'odmawianie_odpowiedzi'
+  | 'wiekszosc_ocen_ndst'
+  | 'liczne_uwagi_o_brakach'
+  | 'niewykorzystanie_form_pomocy'
+  | 'brak_lub_negatywny_wynik_poprawy';
+
+export type NdstTeacherActionKey =
+  | 'biezace_informowanie_ucznia'
+  | 'motywowanie_do_pracy'
+  | 'przedstawienie_konsekwencji'
+  | 'przedstawienie_harmonogramu_poprawy'
+  | 'wielokrotne_rozmowy_z_uczniem'
+  | 'wyznaczenie_konsultacji'
+  | 'dodatkowe_zadania'
+  | 'dostosowanie_tempa_pracy'
+  | 'pomoc_na_biezaco_na_lekcji'
+  | 'stwarzanie_mozliwosci_pozytywnej_oceny'
+  | 'czesta_kontrola_prac_i_zeszytow'
+  | 'skierowanie_na_zajecia_dodatkowe'
+  | 'powiadomienie_wychowawcy'
+  | 'powiadomienie_rodzicow'
+  | 'poinstruowanie_rodzicow'
+  | 'powiadomienie_pedagoga'
+  | 'inne_dzialania';
+
+export type NdstNextSemesterActionKey =
+  | 'motywowanie_systematycznej_pracy'
+  | 'kontakty_z_wychowawca'
+  | 'wspolpraca_nauczyciel_wychowawca_rodzice'
+  | 'wyznaczenie_terminow_uzupelnienia'
+  | 'organizacja_zajec_lub_samopomocy'
+  | 'inne_nastepny_semestr';
+
+export interface UzasadnienieNdstDoc {
+  id: string;
+  type: 'uzasadnienie_ndst';
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  schoolName: string;
+  schoolYear: string;
+  classificationPeriod: ClassificationPeriod;
+  attachmentNumber: string;
+  studentName: string;
+  className: string;
+  subject: string;
+  teacherName: string;
+  educationStage: string;
+  curriculumGaps: string;
+  observations: NdstObservationKey[];
+  teacherActions: NdstTeacherActionKey[];
+  improvementScheduleWhen: string;
+  improvementScheduleForm: string;
+  additionalTasksExamples: string;
+  additionalTasksCompleted: '' | 'TAK' | 'NIE';
+  remedialClassesWhat: string;
+  remedialClassesAttended: '' | 'TAK' | 'NIE' | 'RZADKO';
+  remedialClassesNotAttendedReason: string;
+  parentsNotifiedDate: string;
+  parentsInstructedDate: string;
+  pedagogueNotifiedDate: string;
+  otherTeacherActionsText: string;
+  parentsCooperation: string;
+  nextSemesterActions: NdstNextSemesterActionKey[];
+  nextSemesterOtherText: string;
+  signatureDate: string;
+}
+
 export type ReportDocument =
   | EfektyNauczaniaDoc
   | ZbiorczeEfektyDoc
   | KartaInformacyjnaDoc
-  | PodsumowanieSpecjalistyDoc;
+  | PodsumowanieSpecjalistyDoc
+  | UzasadnienieNieklasyfikowaniaDoc
+  | UzasadnienieNdstDoc;
 
 export type MainTab = 'kreator' | 'profil' | 'baza_wnioskow' | 'kopia_json' | 'o_programie';
 
@@ -220,6 +321,8 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   zbiorcze_efekty: 'Zbiorcze sprawozdanie koordynatora',
   karta_informacyjna: 'Karta informacyjna nauczyciela',
   podsumowanie_specjalisty: 'Podsumowanie pracy specjalisty / komórki',
+  uzasadnienie_nieklasyfikowania: 'Uzasadnienie nieklasyfikowania ucznia',
+  uzasadnienie_ndst: 'Uzasadnienie oceny niedostatecznej',
 };
 
 export const SPECIALIST_ROLE_LABELS: Record<SpecialistRole, string> = {

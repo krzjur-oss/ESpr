@@ -76,7 +76,10 @@
 
   #root,
   #root > div {
+    display: block !important;
     min-height: auto !important;
+    height: auto !important;
+    overflow: visible !important;
     background: #ffffff !important;
   }
 

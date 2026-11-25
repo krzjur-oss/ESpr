@@ -1,111 +1,53 @@
 /**
- * Isolated print helper that prints only the provided document markup inside a
- * hidden same-origin iframe, keeping the interactive application UI completely
- * separated from the printed output and setting a clean PDF title.
+ * Triggers native browser printing on the active document (which uses the
+ * already-loaded Tailwind CSS, custom print styles, and fonts inside #print-area),
+ * while temporarily setting a clean PDF/print document title.
  */
-export function printElementIsolated(
-  sourceElement: HTMLElement | null,
-  documentTitle: string
+export function triggerWindowPrint(
+  documentTitle: string,
+  onAfterPrint?: () => void
 ): void {
-  if (!sourceElement) {
-    window.print();
-    return;
-  }
+  const previousTitle = document.title;
+  const safeTitle =
+    documentTitle.replace(/[<>&"']/g, '').trim() || 'Sprawozdanie szkolne';
 
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  iframe.style.visibility = 'hidden';
-  document.body.appendChild(iframe);
+  document.title = safeTitle;
 
-  const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-  const iframeWin = iframe.contentWindow;
+  let titleRestored = false;
+  let fullyCleaned = false;
 
-  if (!iframeDoc || !iframeWin) {
-    document.body.removeChild(iframe);
-    window.print();
-    return;
-  }
+  const restoreTitle = () => {
+    if (titleRestored) return;
+    titleRestored = true;
+    document.title = previousTitle;
+  };
 
-  // Gather active stylesheets and inline styles from the main document
-  const headNodes = Array.from(
-    document.querySelectorAll('link[rel="stylesheet"], style')
-  )
-    .map((node) => node.outerHTML)
-    .join('\n');
-
-  const safeTitle = documentTitle
-    .replace(/[<>&"']/g, '')
-    .trim() || 'Sprawozdanie szkolne';
-
-  iframeDoc.open();
-  iframeDoc.write(`<!doctype html>
-<html lang="pl">
-  <head>
-    <meta charset="UTF-8" />
-    <title>${safeTitle}</title>
-    ${headNodes}
-    <style>
-      @page {
-        size: A4 portrait;
-        margin: 13mm 14mm;
-      }
-      html, body {
-        background: #ffffff !important;
-        color: #000000 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        height: auto !important;
-      }
-      .a4-sheet {
-        width: 100% !important;
-        min-height: auto !important;
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="print-isolated-container">
-      ${sourceElement.innerHTML}
-    </div>
-  </body>
-</html>`);
-  iframeDoc.close();
-
-  let cleaned = false;
   const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    if (iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
-    }
+    restoreTitle();
+    if (fullyCleaned) return;
+    fullyCleaned = true;
+    window.removeEventListener('afterprint', cleanup);
+    window.removeEventListener('focus', handleWindowFocus);
+    onAfterPrint?.();
   };
 
-  iframeWin.addEventListener('afterprint', cleanup, { once: true });
+  const handleWindowFocus = () => {
+    window.setTimeout(cleanup, 300);
+  };
 
-  const triggerPrint = () => {
-    try {
-      iframeWin.focus();
-      iframeWin.print();
-    } catch {
+  window.addEventListener('afterprint', cleanup, { once: true });
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       window.print();
-    }
-    // Fallback cleanup in case afterprint does not fire in certain browsers
-    window.setTimeout(cleanup, 2000);
-  };
-
-  // Allow cloned styles and fonts a tick to finish layout before printing
-  if (iframeDoc.readyState === 'complete') {
-    window.setTimeout(triggerPrint, 120);
-  } else {
-    iframe.onload = () => window.setTimeout(triggerPrint, 120);
-  }
+      // Register focus listener after print dialog opens/returns
+      window.setTimeout(() => {
+        window.addEventListener('focus', handleWindowFocus, { once: true });
+      }, 200);
+      // Restore title quickly even if afterprint is suppressed in an embedded frame
+      window.setTimeout(restoreTitle, 3000);
+      // Ultimate safety cleanup
+      window.setTimeout(cleanup, 60000);
+    });
+  });
 }

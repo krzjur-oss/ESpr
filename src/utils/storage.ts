@@ -565,6 +565,8 @@ export function validateAndParseImportedJson(jsonText: string): {
       'zbiorcze_efekty',
       'karta_informacyjna',
       'podsumowanie_specjalisty',
+      'uzasadnienie_nieklasyfikowania',
+      'uzasadnienie_ndst',
     ]);
 
     for (const doc of data.documents) {

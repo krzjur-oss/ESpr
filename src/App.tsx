@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Eye,
   FilePlus2,
@@ -29,6 +30,8 @@ import { WnioskiDatabaseView } from './components/WnioskiDatabaseView';
 import { EfektyNauczaniaForm } from './components/forms/EfektyNauczaniaForm';
 import { KartaInformacyjnaForm } from './components/forms/KartaInformacyjnaForm';
 import { PodsumowanieSpecjalistyForm } from './components/forms/PodsumowanieSpecjalistyForm';
+import { UzasadnienieNdstForm } from './components/forms/UzasadnienieNdstForm';
+import { UzasadnienieNieklasyfikowaniaForm } from './components/forms/UzasadnienieNieklasyfikowaniaForm';
 import { ZbiorczeEfektyForm } from './components/forms/ZbiorczeEfektyForm';
 import { PrintDocumentRenderer } from './components/print/PrintDocumentRenderer';
 import {
@@ -36,9 +39,11 @@ import {
   OpenTemplatePickerParams,
   TemplatesProvider,
 } from './context/TemplatesContext';
+import { APP_VERSION } from './data/changelog';
 import { suggestCategoryIdForDocument } from './data/wnioskiDatabase';
 import {
   AppState,
+  ClassificationPeriod,
   CustomTemplateEntry,
   DOCUMENT_TYPE_LABELS,
   DocumentType,
@@ -59,7 +64,7 @@ import {
   duplicateDocument,
   findSubjectAssignment,
 } from './utils/documentFactory';
-import { printElementIsolated } from './utils/printDocument';
+import { triggerWindowPrint } from './utils/printDocument';
 import {
   flushPendingAppStateSave,
   loadAppState,
@@ -96,9 +101,7 @@ export default function App() {
   const [sharePhrasesModalMode, setSharePhrasesModalMode] =
     useState<SharePhrasesModalMode | null>(null);
 
-  const activePrintRef = useRef<HTMLDivElement | null>(null);
-  const batchPrintRef = useRef<HTMLDivElement | null>(null);
-  const sidebarBatchPrintRef = useRef<HTMLDivElement | null>(null);
+  const [printOverrideDocs, setPrintOverrideDocs] = useState<ReportDocument[] | null>(null);
 
   const [confirmDialog, setConfirmDialog] = useState<
     | { kind: 'delete_doc'; doc: ReportDocument }
@@ -291,6 +294,15 @@ export default function App() {
               homeroomClass: prev.profile.homeroomClass || base.homeroomClass,
             };
           }
+          if (
+            base.type === 'uzasadnienie_nieklasyfikowania' ||
+            base.type === 'uzasadnienie_ndst'
+          ) {
+            return {
+              ...base,
+              teacherName: prev.profile.fullName || base.teacherName,
+            };
+          }
           return {
             ...base,
             specialistName: prev.profile.fullName || base.specialistName,
@@ -309,7 +321,11 @@ export default function App() {
 
   const handleAddDocument = (
     type: DocumentType,
-    options?: { specialistRole?: SpecialistRole; coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna' }
+    options?: {
+      specialistRole?: SpecialistRole;
+      coordinatorMode?: 'przedmiotowy' | 'wczesnoszkolna';
+      classificationPeriod?: ClassificationPeriod;
+    }
   ) => {
     const targetSchoolYear =
       yearFilter !== 'all' && yearFilter !== 'Bez roku'
@@ -542,18 +558,25 @@ export default function App() {
 
   const handlePrintActiveDocument = () => {
     if (!activeDoc) return;
-    printElementIsolated(
-      activePrintRef.current,
-      activeDoc.title || 'Sprawozdanie szkolne'
-    );
+    flushSync(() => {
+      setPrintOverrideDocs([activeDoc]);
+    });
+    triggerWindowPrint(activeDoc.title || 'Sprawozdanie szkolne', () => {
+      setPrintOverrideDocs(null);
+    });
   };
 
   const handlePrintBatch = () => {
     if (batchDocuments.length === 0) return;
     const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
-    printElementIsolated(
-      sidebarBatchPrintRef.current,
-      `Komplet sprawozdań${yearSuffix} - ${batchDocuments.length} dok.`
+    flushSync(() => {
+      setPrintOverrideDocs(batchDocuments);
+    });
+    triggerWindowPrint(
+      `Komplet sprawozdań${yearSuffix} - ${batchDocuments.length} dok.`,
+      () => {
+        setPrintOverrideDocs(null);
+      }
     );
   };
 
@@ -564,11 +587,15 @@ export default function App() {
       return;
     }
     const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
-    printElementIsolated(
-      batchPrintRef.current,
+    flushSync(() => {
+      setPrintOverrideDocs(null);
+    });
+    triggerWindowPrint(
       `Komplet sprawozdań${yearSuffix} - ${docsToPrint.length} dok.`
     );
   };
+
+  const renderedPrintDocs = printOverrideDocs ?? docsToPrint;
 
   const canInsertConclusionsToActive =
     !!activeDoc &&
@@ -847,6 +874,28 @@ export default function App() {
                               }
                             />
                           )}
+                          {activeDoc.type === 'uzasadnienie_nieklasyfikowania' && (
+                            <UzasadnienieNieklasyfikowaniaForm
+                              doc={activeDoc}
+                              profile={state.profile}
+                              availableYears={availableYears}
+                              onChange={handleUpdateDocument}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
+                          {activeDoc.type === 'uzasadnienie_ndst' && (
+                            <UzasadnienieNdstForm
+                              doc={activeDoc}
+                              profile={state.profile}
+                              availableYears={availableYears}
+                              onChange={handleUpdateDocument}
+                              onRequestReset={() =>
+                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
+                              }
+                            />
+                          )}
                         </TemplatesProvider>
                       </div>
                     </div>
@@ -912,7 +961,7 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white px-4 md:px-6 py-2.5 text-xs text-slate-500 no-print">
         <div className="mx-auto flex max-w-[1440px] flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-center sm:text-left">
-            © 2026 <strong className="font-medium text-slate-700">mgr Krzysztof Jureczek</strong> · E-Sprawozdania v1.0 · Bezpłatnie dla nauczycieli i edukacji (WLDE)
+            © 2026 <strong className="font-medium text-slate-700">mgr Krzysztof Jureczek</strong> · E-Sprawozdania <span className="font-mono-tabular">v{APP_VERSION}</span> · Bezpłatnie dla nauczycieli i edukacji (WLDE)
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4">
             <button
@@ -925,6 +974,17 @@ export default function App() {
               className="hover:text-blue-900 hover:underline cursor-pointer"
             >
               O programie
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAboutSection('changelog');
+                setActiveTab('o_programie');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-blue-900 hover:underline cursor-pointer"
+            >
+              Historia zmian
             </button>
             <button
               type="button"
@@ -952,27 +1012,13 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Dedicated isolated print containers (separated from interactive UI) */}
-      <div ref={activePrintRef} className="hidden" aria-hidden="true">
-        {activeDoc && <PrintDocumentRenderer doc={activeDoc} isLast />}
-      </div>
-
-      <div ref={sidebarBatchPrintRef} className="hidden" aria-hidden="true">
-        {batchDocuments.map((doc, index) => (
+      {/* Dedicated print-only container using loaded styles & @media print */}
+      <div id="print-area" className="hidden print:block print-only-root">
+        {renderedPrintDocs.map((doc, index) => (
           <PrintDocumentRenderer
             key={doc.id}
             doc={doc}
-            isLast={index === batchDocuments.length - 1}
-          />
-        ))}
-      </div>
-
-      <div id="print-area" ref={batchPrintRef} className="hidden print:block print-only-root">
-        {docsToPrint.map((doc, index) => (
-          <PrintDocumentRenderer
-            key={doc.id}
-            doc={doc}
-            isLast={index === docsToPrint.length - 1}
+            isLast={index === renderedPrintDocs.length - 1}
           />
         ))}
       </div>

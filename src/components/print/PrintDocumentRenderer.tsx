@@ -1,11 +1,18 @@
 import React from 'react';
 import {
+  NDST_NEXT_SEMESTER_OPTIONS,
+  NDST_OBSERVATION_OPTIONS,
+  NDST_TEACHER_ACTION_OPTIONS,
+} from '../../data/ndstOptions';
+import {
   CURRICULUM_STATUS_LABELS,
   EfektyNauczaniaDoc,
   KartaInformacyjnaDoc,
   PodsumowanieSpecjalistyDoc,
   ReportDocument,
   SPECIALIST_ROLE_LABELS,
+  UzasadnienieNdstDoc,
+  UzasadnienieNieklasyfikowaniaDoc,
   ZbiorczeEfektyDoc,
 } from '../../types/reports';
 
@@ -15,6 +22,56 @@ interface PrintDocumentRendererProps {
 }
 
 const EmptyLine = () => <span className="text-slate-400 italic">Nie uzupełniono</span>;
+
+const DottedFill: React.FC<{ value?: string; minDots?: string }> = ({
+  value,
+  minDots = '......................',
+}) => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return <span className="text-slate-500 tracking-wider">{minDots}</span>;
+  }
+  return <span className="font-medium text-slate-950">{trimmed}</span>;
+};
+
+const PrintCheckbox: React.FC<{
+  checked: boolean;
+  label: string;
+  children?: React.ReactNode;
+}> = ({ checked, label, children }) => (
+  <div className="print-avoid-break flex items-start gap-2 text-[11px] leading-[1.42] text-slate-900">
+    <span
+      className={`mt-[2.5px] inline-flex h-[11px] w-[11px] shrink-0 items-center justify-center border ${
+        checked
+          ? 'border-slate-950 bg-slate-100 text-slate-950'
+          : 'border-slate-700 bg-white'
+      }`}
+      aria-hidden="true"
+    >
+      {checked && (
+        <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 fill-none stroke-current" strokeWidth={2.2}>
+          <polyline points="2 6.5 4.8 9.2 10 3" />
+        </svg>
+      )}
+    </span>
+    <div className="min-w-0 flex-1">
+      <span className={checked ? 'font-medium text-slate-950' : 'text-slate-800'}>{label}</span>
+      {children}
+    </div>
+  </div>
+);
+
+const PrintChoiceBadge: React.FC<{ label: string; selected: boolean }> = ({ label, selected }) => (
+  <span
+    className={
+      selected
+        ? 'inline-block border border-slate-900 px-1 py-0 text-[10px] font-bold text-slate-950'
+        : 'text-[10.5px] text-slate-500'
+    }
+  >
+    {label}
+  </span>
+);
 
 const PrintSection: React.FC<{
   number?: string;
@@ -506,6 +563,395 @@ const PodsumowanieSpecjalistyPrint: React.FC<{ doc: PodsumowanieSpecjalistyDoc }
   </article>
 );
 
+const UzasadnienieNieklasyfikowaniaPrint: React.FC<{ doc: UzasadnienieNieklasyfikowaniaDoc }> = ({
+  doc,
+}) => {
+  const isAnnual = doc.classificationPeriod === 'roczne';
+  const schoolYearText = doc.schoolYear.trim() || '..../....';
+  const attachmentText = doc.attachmentNumber.trim() || '....';
+
+  return (
+    <article className="a4-sheet font-serif-doc text-slate-950">
+      <div className="flex items-start justify-between gap-4 text-[11px] mb-5">
+        <span className="text-slate-600 text-[10.5px] font-sans">
+          {doc.schoolName?.trim() || ''}
+        </span>
+        <span className="font-mono-tabular shrink-0 text-[11.5px]">
+          Załącznik nr {attachmentText}/{schoolYearText}
+        </span>
+      </div>
+
+      <header className="text-center mb-8">
+        <h1 className="text-[15.5px] font-bold uppercase tracking-wide leading-[1.45] text-slate-950">
+          UZASADNIENIE
+          <br />
+          {isAnnual
+            ? `NIEKLASYFIKOWANIA UCZNIA ZA ROK SZKOLNY ${schoolYearText}`
+            : 'NIEKLASYFIKOWANIA UCZNIA ZA I PÓŁROCZE'}
+          <br />Z PRZEDMIOTU
+        </h1>
+      </header>
+
+      <div className="space-y-2.5 text-[12px] leading-[1.6] mb-9">
+        <p>
+          <strong>Nazwisko i imię ucznia:</strong>{' '}
+          <DottedFill
+            value={doc.studentName}
+            minDots="............................................................................."
+          />
+        </p>
+        <p className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+          <span>
+            <strong>Klasa:</strong>{' '}
+            <DottedFill value={doc.className} minDots="............" />
+          </span>
+          <span>
+            <strong>rok szkolny:</strong>{' '}
+            <span className="font-mono-tabular">{schoolYearText}</span>
+          </span>
+          <span className="flex-1 min-w-[180px]">
+            <strong>Przedmiot:</strong>{' '}
+            <DottedFill value={doc.subject} minDots="........................................" />
+          </span>
+        </p>
+        <p>
+          <strong>Nauczyciel prowadzący:</strong>{' '}
+          <DottedFill
+            value={doc.teacherName}
+            minDots="............................................................................."
+          />
+        </p>
+      </div>
+
+      <div className="space-y-4 text-[12px] leading-[1.7] text-justify">
+        <p className="indent-7">
+          W wyniku klasyfikacji {isAnnual ? 'rocznej' : 'śródrocznej'} uczeń/uczennica nie uzyskał/a
+          podstaw do ustalenia {isAnnual ? 'rocznej' : 'śródrocznej'} oceny klasyfikacyjnej z powodu{' '}
+          <span className="font-mono-tabular font-semibold">
+            {doc.absencePercent.trim() || '..........'}
+          </span>{' '}
+          % nieobecności na zajęciach.
+        </p>
+        <p className="indent-7">
+          Pomimo działań podjętych przez nauczyciela uczeń/uczennica nie opanował podstawowych
+          umiejętności i wiadomości, które umożliwiałyby uzyskanie pozytywnej oceny{' '}
+          {isAnnual
+            ? `w roku szkolnym ${schoolYearText}.`
+            : `w I półroczu roku szkolnego ${schoolYearText}.`}
+        </p>
+        {doc.additionalJustification.trim() && (
+          <p className="indent-7 whitespace-pre-line">{doc.additionalJustification.trim()}</p>
+        )}
+      </div>
+
+      <div className="print-avoid-break mt-16 flex items-end justify-between gap-8 text-[11px]">
+        <div className="text-slate-600">
+          {doc.signatureDate.trim() && (
+            <p className="font-mono-tabular text-[10.5px] text-slate-800">
+              Data: {doc.signatureDate.trim()}
+            </p>
+          )}
+        </div>
+        <div className="text-center min-w-[270px]">
+          <div className="h-7 border-b border-dotted border-slate-500 mb-1" />
+          <p className="text-[10.5px] font-semibold text-slate-900">
+            Podpis nauczyciela prowadzącego zajęcia edukacyjne
+          </p>
+          {doc.teacherName.trim() && (
+            <p className="text-[10px] text-slate-600 mt-0.5">{doc.teacherName.trim()}</p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+};
+
+const UzasadnienieNdstPrint: React.FC<{ doc: UzasadnienieNdstDoc }> = ({ doc }) => {
+  const isAnnual = doc.classificationPeriod === 'roczne';
+  const schoolYearText = doc.schoolYear.trim() || '..../....';
+  const attachmentText = doc.attachmentNumber.trim() || '....';
+  const gapLines = doc.curriculumGaps
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const cooperationLines = doc.parentsCooperation
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  return (
+    <article className="a4-sheet font-serif-doc text-slate-950">
+      <div className="flex items-start justify-between gap-4 text-[11px] mb-3">
+        <span className="text-slate-600 text-[10.5px] font-sans">
+          {doc.schoolName?.trim() || ''}
+        </span>
+        <span className="font-mono-tabular shrink-0 text-[11px]">
+          Załącznik nr {attachmentText}/{schoolYearText}
+        </span>
+      </div>
+
+      <header className="text-center mb-4">
+        <h1 className="text-[15px] font-bold uppercase tracking-wide leading-[1.4] text-slate-950">
+          UZASADNIENIE
+          <br />
+          {isAnnual
+            ? `OCENY NIEDOSTATECZNEJ ZA ROK SZKOLNY ${schoolYearText}`
+            : 'OCENY NIEDOSTATECZNEJ ZA I PÓŁROCZE'}
+          <br />Z PRZEDMIOTU
+        </h1>
+      </header>
+
+      <div className="space-y-1.5 text-[11.5px] leading-[1.5] mb-3.5 print-avoid-break">
+        <p>
+          <strong>Nazwisko i imię ucznia:</strong>{' '}
+          <DottedFill
+            value={doc.studentName}
+            minDots="............................................................................."
+          />
+        </p>
+        <p className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
+          <span>
+            <strong>Klasa:</strong>{' '}
+            <DottedFill value={doc.className} minDots="............" />
+          </span>
+          <span>
+            <strong>rok szkolny:</strong>{' '}
+            <span className="font-mono-tabular">{schoolYearText}</span>
+          </span>
+          <span className="flex-1 min-w-[170px]">
+            <strong>Przedmiot:</strong>{' '}
+            <DottedFill value={doc.subject} minDots="...................................." />
+          </span>
+        </p>
+        <p>
+          <strong>Nauczyciel prowadzący:</strong>{' '}
+          <DottedFill
+            value={doc.teacherName}
+            minDots="............................................................................."
+          />
+        </p>
+      </div>
+
+      <p className="indent-7 text-[11.5px] leading-[1.55] text-justify mb-4 print-avoid-break">
+        Uczeń w wyniku klasyfikacji {isAnnual ? 'rocznej' : 'śródrocznej'} uzyskał ocenę
+        niedostateczną z zajęć edukacyjnych, ponieważ nie nabył podstawowych wiadomości i
+        umiejętności przewidzianych w wymaganiach edukacyjnych na ocenę co najmniej dopuszczającą
+        dla klasy <DottedFill value={doc.className} minDots="...................." />,{' '}
+        {doc.educationStage || 'drugiego etapu kształcenia'}.
+      </p>
+
+      {/* Section 1 */}
+      <div className="mb-3.5 print-avoid-break">
+        <h2 className="text-[11.5px] font-bold text-slate-950 mb-1.5">
+          1. Braki w umiejętnościach i wiedzy ucznia <em className="font-semibold">(z podstawy programowej)</em>:
+        </h2>
+        {gapLines.length > 0 ? (
+          <ul className="list-disc pl-6 space-y-1 text-[11px] leading-[1.45]">
+            {gapLines.map((line, idx) => (
+              <li key={idx}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <ul className="list-disc pl-6 space-y-1 text-[11px] text-slate-500">
+            {Array.from({ length: 5 }).map((_, idx) => (
+              <li key={idx} className="tracking-wider">
+                ................................................................................................................
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Section 2 */}
+      <div className="mb-3.5">
+        <h2 className="text-[11.5px] font-bold text-slate-950 mb-1.5 print-avoid-break">
+          2. Obserwacja pracy i zaangażowania ucznia w trakcie zajęć <em className="font-semibold">(do wyboru)</em>:
+        </h2>
+        <div className="space-y-1 pl-1">
+          {NDST_OBSERVATION_OPTIONS.map((opt) => (
+            <PrintCheckbox
+              key={opt.key}
+              checked={doc.observations.includes(opt.key)}
+              label={opt.label}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Section 3 */}
+      <div className="mb-3.5">
+        <h2 className="text-[11.5px] font-bold text-slate-950 mb-1.5 print-avoid-break">
+          3. Działania podjęte przez nauczyciela <em className="font-semibold">(do wyboru)</em>:
+        </h2>
+        <div className="space-y-1.5 pl-1">
+          {NDST_TEACHER_ACTION_OPTIONS.map((opt) => {
+            const checked = doc.teacherActions.includes(opt.key);
+            if (opt.key === 'przedstawienie_harmonogramu_poprawy') {
+              return (
+                <PrintCheckbox
+                  key={opt.key}
+                  checked={checked}
+                  label={`${opt.label}, kiedy? `}
+                >
+                  <DottedFill value={doc.improvementScheduleWhen} minDots="....................." />
+                  {', w jakiej formie? '}
+                  <DottedFill value={doc.improvementScheduleForm} minDots="................................." />
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'dodatkowe_zadania') {
+              return (
+                <PrintCheckbox
+                  key={opt.key}
+                  checked={checked}
+                  label={`${opt.label}, proszę podać przykłady: `}
+                >
+                  <DottedFill value={doc.additionalTasksExamples} minDots="........................................" />
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10.5px]">
+                    <span>czy uczeń wywiązywał się z zadań?</span>
+                    <PrintChoiceBadge label="TAK" selected={doc.additionalTasksCompleted === 'TAK'} />
+                    <span>/</span>
+                    <PrintChoiceBadge label="NIE" selected={doc.additionalTasksCompleted === 'NIE'} />
+                  </div>
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'skierowanie_na_zajecia_dodatkowe') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={opt.label}>
+                  <div className="mt-0.5 space-y-0.5 text-[10.5px]">
+                    <div>
+                      pozalekcyjne, jakie?{' '}
+                      <DottedFill value={doc.remedialClassesWhat} minDots="..........................................." />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>czy uczeń uczestniczył w zajęciach?</span>
+                      <PrintChoiceBadge label="TAK" selected={doc.remedialClassesAttended === 'TAK'} />
+                      <span>,</span>
+                      <PrintChoiceBadge label="NIE" selected={doc.remedialClassesAttended === 'NIE'} />
+                      <span>,</span>
+                      <PrintChoiceBadge label="RZADKO" selected={doc.remedialClassesAttended === 'RZADKO'} />
+                    </div>
+                    <div>
+                      jeżeli nie, to dlaczego:{' '}
+                      <DottedFill
+                        value={doc.remedialClassesNotAttendedReason}
+                        minDots="..............................................."
+                      />
+                    </div>
+                  </div>
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'powiadomienie_rodzicow') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={`${opt.label}, kiedy? `}>
+                  <DottedFill value={doc.parentsNotifiedDate} minDots="..............." /> (data)
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'poinstruowanie_rodzicow') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={`${opt.label}, kiedy? `}>
+                  <DottedFill value={doc.parentsInstructedDate} minDots="..............." />
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'powiadomienie_pedagoga') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={`${opt.label}, kiedy? `}>
+                  <DottedFill value={doc.pedagogueNotifiedDate} minDots="................................." />
+                </PrintCheckbox>
+              );
+            }
+            if (opt.key === 'inne_dzialania') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={`${opt.label}: `}>
+                  <DottedFill
+                    value={doc.otherTeacherActionsText}
+                    minDots="....................................................................................."
+                  />
+                </PrintCheckbox>
+              );
+            }
+            return <PrintCheckbox key={opt.key} checked={checked} label={opt.label} />;
+          })}
+        </div>
+      </div>
+
+      {/* Section 4 */}
+      <div className="mb-3.5 print-avoid-break">
+        <h2 className="text-[11.5px] font-bold text-slate-950 mb-1.5">
+          4. Współpraca z rodzicami/prawnymi opiekunami:
+        </h2>
+        {cooperationLines.length > 0 ? (
+          <div className="text-[11px] leading-[1.5] whitespace-pre-line pl-1">
+            {doc.parentsCooperation.trim()}
+          </div>
+        ) : (
+          <div className="space-y-1.5 text-[11px] text-slate-500 pl-1">
+            {Array.from({ length: 4 }).map((_, idx) => (
+              <p key={idx} className="tracking-wider">
+                ....................................................................................................................
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section 5 */}
+      <div className="mb-4 print-avoid-break">
+        <h2 className="text-[11.5px] font-bold text-slate-950 mb-1.5">
+          5. Działania, które zostaną podjęte przez nauczyciela wobec ucznia w następnym semestrze celem wyeliminowania trudności dydaktycznych ucznia <em className="font-semibold">(do wyboru)</em>:
+        </h2>
+        <div className="space-y-1 pl-1">
+          {NDST_NEXT_SEMESTER_OPTIONS.map((opt) => {
+            const checked = doc.nextSemesterActions.includes(opt.key);
+            if (opt.key === 'inne_nastepny_semestr') {
+              return (
+                <PrintCheckbox key={opt.key} checked={checked} label={`${opt.label}: `}>
+                  <DottedFill
+                    value={doc.nextSemesterOtherText}
+                    minDots="....................................................................................."
+                  />
+                </PrintCheckbox>
+              );
+            }
+            return <PrintCheckbox key={opt.key} checked={checked} label={opt.label} />;
+          })}
+        </div>
+      </div>
+
+      <p className="indent-7 text-[11.5px] leading-[1.55] text-justify print-avoid-break">
+        Pomimo działań podjętych przez nauczyciela uczeń nie opanował podstawowych umiejętności i
+        wiadomości, które umożliwiałyby uzyskanie pozytywnej oceny{' '}
+        {isAnnual
+          ? `w roku szkolnym ${schoolYearText}.`
+          : `w I półroczu roku szkolnego ${schoolYearText}.`}
+      </p>
+
+      <div className="print-avoid-break mt-10 flex items-end justify-between gap-8 text-[11px]">
+        <div className="text-slate-600">
+          {doc.signatureDate.trim() && (
+            <p className="font-mono-tabular text-[10.5px] text-slate-800">
+              Data: {doc.signatureDate.trim()}
+            </p>
+          )}
+        </div>
+        <div className="text-center min-w-[270px]">
+          <div className="h-7 border-b border-dotted border-slate-500 mb-1" />
+          <p className="text-[10.5px] font-semibold text-slate-900">
+            Podpis nauczyciela prowadzącego zajęcia edukacyjne
+          </p>
+          {doc.teacherName.trim() && (
+            <p className="text-[10px] text-slate-600 mt-0.5">{doc.teacherName.trim()}</p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+};
+
 export const PrintDocumentRenderer: React.FC<PrintDocumentRendererProps> = ({
   doc,
   isLast = true,
@@ -516,6 +962,10 @@ export const PrintDocumentRenderer: React.FC<PrintDocumentRendererProps> = ({
       {doc.type === 'zbiorcze_efekty' && <ZbiorczeEfektyPrint doc={doc} />}
       {doc.type === 'karta_informacyjna' && <KartaInformacyjnaPrint doc={doc} />}
       {doc.type === 'podsumowanie_specjalisty' && <PodsumowanieSpecjalistyPrint doc={doc} />}
+      {doc.type === 'uzasadnienie_nieklasyfikowania' && (
+        <UzasadnienieNieklasyfikowaniaPrint doc={doc} />
+      )}
+      {doc.type === 'uzasadnienie_ndst' && <UzasadnienieNdstPrint doc={doc} />}
     </div>
   );
 };
