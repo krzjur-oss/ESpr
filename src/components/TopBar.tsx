@@ -1,13 +1,17 @@
 import React from 'react';
-import { Printer } from 'lucide-react';
+import { FileDown, Loader2, Printer } from 'lucide-react';
 import { MainTab } from '../types/reports';
+import { PdfExportProgress } from '../utils/pdfExport';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface TopBarProps {
   activeTab: MainTab;
   onChangeTab: (tab: MainTab) => void;
+  onDownloadPdf: () => void;
   onPrint: () => void;
   hasDocuments: boolean;
+  isGeneratingPdf?: boolean;
+  pdfProgress?: PdfExportProgress | null;
 }
 
 const NAV_ITEMS: { id: MainTab; label: string }[] = [
@@ -22,8 +26,11 @@ const NAV_ITEMS: { id: MainTab; label: string }[] = [
 export const TopBar: React.FC<TopBarProps> = ({
   activeTab,
   onChangeTab,
+  onDownloadPdf,
   onPrint,
   hasDocuments,
+  isGeneratingPdf = false,
+  pdfProgress = null,
 }) => {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm no-print">
@@ -61,17 +68,38 @@ export const TopBar: React.FC<TopBarProps> = ({
           })}
         </nav>
 
-        {/* Zone 3: Primary action + PWA Install when available */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Zone 3: Primary PDF download + native print + PWA Install */}
+        <div className="flex items-center gap-2 shrink-0">
           <PWAInstallButton />
           <button
             type="button"
-            onClick={onPrint}
-            disabled={!hasDocuments}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-900 px-3.5 md:px-4 py-2 text-xs md:text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            onClick={onDownloadPdf}
+            disabled={!hasDocuments || isGeneratingPdf}
+            title="Wygeneruj i pobierz plik PDF bezpośrednio na dysk"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-3 md:px-3.5 py-2 text-xs md:text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Printer className="w-4 h-4 shrink-0" />
-            <span>Drukuj / PDF</span>
+            {isGeneratingPdf ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            ) : (
+              <FileDown className="w-4 h-4 shrink-0" />
+            )}
+            <span className="tabular-nums">
+              {isGeneratingPdf
+                ? pdfProgress
+                  ? `Generowanie PDF (${pdfProgress.percent}%)`
+                  : 'Generowanie PDF…'
+                : 'Pobierz PDF'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={onPrint}
+            disabled={!hasDocuments || isGeneratingPdf}
+            title="Otwórz systemowe okno drukowania"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 md:px-3 py-2 text-xs md:text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Printer className="w-4 h-4 text-blue-900 shrink-0" />
+            <span className="hidden sm:inline">Drukuj</span>
           </button>
         </div>
       </div>
@@ -99,6 +127,21 @@ export const TopBar: React.FC<TopBarProps> = ({
           );
         })}
       </nav>
+
+      {isGeneratingPdf && pdfProgress && (
+        <div
+          aria-hidden="true"
+          className="h-1 w-full overflow-hidden bg-blue-100"
+        >
+          <div
+            className="h-full w-full bg-blue-900 transition-transform duration-200 ease-out"
+            style={{
+              transform: `scaleX(${Math.max(0.05, Math.min(1, pdfProgress.percent / 100))})`,
+              transformOrigin: 'left center',
+            }}
+          />
+        </div>
+      )}
     </header>
   );
 };

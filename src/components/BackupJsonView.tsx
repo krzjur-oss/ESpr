@@ -1,7 +1,18 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, FolderKanban, Share2, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  FileArchive,
+  FolderKanban,
+  Share2,
+  ShieldCheck,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { AppState } from '../types/reports';
 import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storage';
+import { exportStateAsZip, extractBackupJsonFromZip } from '../utils/zipBackup';
 
 interface BackupJsonViewProps {
   state: AppState;
@@ -28,14 +39,32 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
     message: string;
   } | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
-      const parsed = validateAndParseImportedJson(text);
+    const resetInput = () => {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+
+    try {
+      let jsonText = '';
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        const buffer = await file.arrayBuffer();
+        const extracted = extractBackupJsonFromZip(buffer);
+        if (!extracted.ok) {
+          setFeedback({ type: 'error', message: extracted.error });
+          resetInput();
+          return;
+        }
+        jsonText = extracted.jsonText;
+      } else {
+        jsonText = await file.text();
+      }
+
+      const parsed = validateAndParseImportedJson(jsonText);
       if (parsed.ok) {
         setFeedback(null);
         onImportState(parsed.state);
@@ -45,17 +74,14 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
           message: parsed.error,
         });
       }
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    };
-    reader.onerror = () => {
+    } catch {
       setFeedback({
         type: 'error',
         message: 'Nie udało się odczytać wybranego pliku.',
       });
-    };
-    reader.readAsText(file, 'utf-8');
+    } finally {
+      resetInput();
+    }
   };
 
   return (
@@ -91,10 +117,10 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
         <section className="rounded-xl border border-slate-200 bg-white p-6 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-semibold text-slate-900">
-              Eksport pełnej sesji do pliku JSON
+              Eksport pełnej sesji (ZIP lub JSON)
             </h2>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-              Pobierz plik zawierający wspólny profil oraz wszystkie utworzone karty sprawozdań ({state.documents.length}).
+              Pobierz spakowane archiwum <strong className="font-mono-tabular">.zip</strong> (pełna kopia plus osobne pliki dla profilu, wszystkich dokumentów ({state.documents.length}) i baz danych) albo pojedynczy plik <strong className="font-mono-tabular">.json</strong>.
             </p>
             <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
               <p>
@@ -114,7 +140,11 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                 <strong className="font-mono-tabular text-slate-900">{state.customTemplates.length}</strong>
               </p>
               <p>
-                Ostatnia kopia zapasowa JSON:{' '}
+                Paczki nadzoru w bazie:{' '}
+                <strong className="font-mono-tabular text-slate-900">{state.supervisionPackages.length}</strong>
+              </p>
+              <p>
+                Ostatnia kopia zapasowa:{' '}
                 <strong className="font-mono-tabular text-slate-900">
                   {lastBackupExportAt
                     ? new Date(lastBackupExportAt).toLocaleString('pl-PL', {
@@ -126,36 +156,65 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
               </p>
             </div>
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 leading-relaxed">
-              <strong>Uwaga RODO:</strong> Plik kopii JSON może zawierać imiona i nazwiska uczniów oraz inne dane osobowe. Plik nie jest szyfrowany — przekazuj go wyłącznie bezpiecznym kanałem i usuń po użyciu.
+              <strong>Uwaga RODO:</strong> Plik kopii JSON oraz archiwum ZIP mogą zawierać imiona i nazwiska uczniów oraz inne dane osobowe. Pliki nie są szyfrowane — przekazuj je wyłącznie bezpiecznym kanałem i usuń po użyciu.
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const ok = exportStateAsJson(state);
-              if (!ok) {
-                setFeedback({
-                  type: 'error',
-                  message: 'Nie udało się zainicjować pobierania pliku JSON w przeglądarce.',
-                });
-              }
-            }}
-            className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 transition-colors cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Pobierz kopię JSON</span>
-          </button>
+          <div className="mt-6 flex flex-col sm:flex-row gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                const ok = exportStateAsZip(state);
+                if (ok) {
+                  setFeedback({
+                    type: 'success',
+                    message:
+                      'Pobrano archiwum ZIP zawierające pełną kopię zapasową, profil, wszystkie dokumenty oraz bazy wniosków, szablonów i nadzoru.',
+                  });
+                } else {
+                  setFeedback({
+                    type: 'error',
+                    message: 'Nie udało się wygenerować lub pobrać archiwum ZIP w przeglądarce.',
+                  });
+                }
+              }}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <FileArchive className="w-4 h-4" />
+              <span>Pobierz archiwum .ZIP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const ok = exportStateAsJson(state);
+                if (ok) {
+                  setFeedback({
+                    type: 'success',
+                    message: 'Pobrano pojedynczy plik kopii zapasowej JSON.',
+                  });
+                } else {
+                  setFeedback({
+                    type: 'error',
+                    message: 'Nie udało się zainicjować pobierania pliku JSON w przeglądarce.',
+                  });
+                }
+              }}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-blue-900" />
+              <span>Pobierz kopię JSON</span>
+            </button>
+          </div>
         </section>
 
         {/* Import */}
         <section className="rounded-xl border border-slate-200 bg-white p-6 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-semibold text-slate-900">
-              Import danych z pliku JSON
+              Import danych z pliku JSON lub archiwum ZIP
             </h2>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-              Wczytaj wcześniej zapisaną kopię zapasową. Obecna sesja zostanie zastąpiona danymi z pliku.
+              Wczytaj wcześniej zapisaną kopię zapasową (<code className="font-mono-tabular">.json</code> lub wyeksportowane archiwum <code className="font-mono-tabular">.zip</code>). Obecna sesja zostanie zastąpiona danymi z pliku.
             </p>
           </div>
 
@@ -163,17 +222,19 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/json,.json"
-              onChange={handleFileChange}
+              accept="application/json,.json,application/zip,.zip"
+              onChange={(e) => {
+                void handleFileChange(e);
+              }}
               className="hidden"
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Upload className="w-4 h-4 text-blue-900" />
-              <span>Wybierz plik JSON z dysku</span>
+              <span>Wybierz plik JSON lub ZIP z dysku</span>
             </button>
           </div>
         </section>

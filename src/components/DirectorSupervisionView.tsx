@@ -6,6 +6,7 @@ import {
   FileDown,
   FileSpreadsheet,
   FolderKanban,
+  Loader2,
   Printer,
   Trash2,
   Upload,
@@ -17,6 +18,8 @@ import {
   TeacherSupervisionPackage,
 } from '../types/reports';
 import { ClassCollectiveReport, resolvePackageTeacherName } from '../utils/supervision';
+import { PdfExportProgress } from '../utils/pdfExport';
+import { PdfProgressBar } from './PdfProgressBar';
 import { ClassCollectivePrintSheet } from './print/ClassCollectivePrintSheet';
 
 export interface SupervisionImportFeedback {
@@ -42,8 +45,11 @@ interface DirectorSupervisionViewProps {
   onImportFiles: (files: FileList | File[]) => void;
   onUpdateClassNotes: (notesKey: string, notes: string) => void;
   onRequestDeletePackage: (pkg: TeacherSupervisionPackage) => void;
+  onDownloadClassPdf: (report: ClassCollectiveReport) => void;
   onPrintClass: (report: ClassCollectiveReport) => void;
   onGenerateBatchPdf: () => void;
+  isGeneratingPdf?: boolean;
+  pdfProgress?: PdfExportProgress | null;
 }
 
 function formatClassesNoun(count: number): string {
@@ -74,8 +80,11 @@ export const DirectorSupervisionView: React.FC<DirectorSupervisionViewProps> = (
   onImportFiles,
   onUpdateClassNotes,
   onRequestDeletePackage,
+  onDownloadClassPdf,
   onPrintClass,
   onGenerateBatchPdf,
+  isGeneratingPdf = false,
+  pdfProgress = null,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'classes' | 'teachers'>('classes');
@@ -174,17 +183,27 @@ export const DirectorSupervisionView: React.FC<DirectorSupervisionViewProps> = (
 
             <button
               type="button"
-              disabled={reports.length === 0}
+              disabled={reports.length === 0 || isGeneratingPdf}
               onClick={onGenerateBatchPdf}
               title={
                 activeSelectedCount > 0
-                  ? `Wygeneruj jeden plik PDF dla ${activeSelectedCount} zaznaczonych klas (${yearFilter === 'all' ? 'wszystkie lata' : `rok ${yearFilter}`}) — w oknie drukowania wybierz „Zapisz jako PDF”`
-                  : `Wygeneruj jeden plik PDF dla wszystkich ${reports.length} klas (${yearFilter === 'all' ? 'wszystkie lata' : `rok ${yearFilter}`}) — w oknie drukowania wybierz „Zapisz jako PDF”`
+                  ? `Wygeneruj i pobierz jeden plik PDF dla ${activeSelectedCount} zaznaczonych klas (${yearFilter === 'all' ? 'wszystkie lata' : `rok ${yearFilter}`})`
+                  : `Wygeneruj i pobierz jeden plik PDF dla wszystkich ${reports.length} klas (${yearFilter === 'all' ? 'wszystkie lata' : `rok ${yearFilter}`})`
               }
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <FileDown className="w-3.5 h-3.5 shrink-0" />
-              <span className="tabular-nums">{pdfButtonLabel}</span>
+              {isGeneratingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span className="tabular-nums">
+                {isGeneratingPdf
+                  ? pdfProgress
+                    ? `Generowanie PDF (${pdfProgress.percent}%)`
+                    : 'Generowanie PDF…'
+                  : pdfButtonLabel}
+              </span>
             </button>
           </div>
         </div>
@@ -418,18 +437,28 @@ export const DirectorSupervisionView: React.FC<DirectorSupervisionViewProps> = (
                   {yearFilter !== 'all' ? yearFilter : 'Wszystkie lata'}
                 </span>
               </div>
+              {isGeneratingPdf && pdfProgress && (
+                <PdfProgressBar progress={pdfProgress} compact />
+              )}
               <button
                 type="button"
+                disabled={isGeneratingPdf}
                 onClick={onGenerateBatchPdf}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 transition-colors whitespace-nowrap cursor-pointer"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
               >
-                <FileDown className="w-3.5 h-3.5 shrink-0" />
+                {isGeneratingPdf ? (
+                  <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                ) : (
+                  <FileDown className="w-3.5 h-3.5 shrink-0" />
+                )}
                 <span className="tabular-nums truncate">
-                  {activeSelectedCount > 0
-                    ? `Jeden PDF · wybrane (${activeSelectedCount})`
-                    : yearFilter !== 'all'
-                      ? `Jeden PDF · ${yearFilter} (${reports.length})`
-                      : `Jeden PDF · wszystkie (${reports.length})`}
+                  {isGeneratingPdf
+                    ? 'Generowanie PDF…'
+                    : activeSelectedCount > 0
+                      ? `Jeden PDF · wybrane (${activeSelectedCount})`
+                      : yearFilter !== 'all'
+                        ? `Jeden PDF · ${yearFilter} (${reports.length})`
+                        : `Jeden PDF · wszystkie (${reports.length})`}
                 </span>
               </button>
             </div>
@@ -470,11 +499,27 @@ export const DirectorSupervisionView: React.FC<DirectorSupervisionViewProps> = (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => onPrintClass(activeReport)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    disabled={isGeneratingPdf}
+                    onClick={() => onDownloadClassPdf(activeReport)}
+                    title="Wygeneruj i pobierz plik PDF dla tej klasy"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5 text-blue-900" />
-                    <span>Drukuj / PDF tej klasy</span>
+                    {isGeneratingPdf ? (
+                      <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                    ) : (
+                      <FileDown className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{isGeneratingPdf ? 'Generowanie…' : 'Pobierz PDF tej klasy'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingPdf}
+                    onClick={() => onPrintClass(activeReport)}
+                    title="Otwórz systemowe okno drukowania dla tej klasy"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-blue-900 shrink-0" />
+                    <span>Drukuj</span>
                   </button>
 
                   <div className="inline-flex items-center rounded-lg bg-slate-100 p-1">

@@ -98,6 +98,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title}
         metaText={`Karta informacyjna nauczyciela · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 

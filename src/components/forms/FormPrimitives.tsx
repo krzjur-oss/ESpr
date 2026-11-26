@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Bookmark, BookmarkPlus, BookOpen, RotateCcw } from 'lucide-react';
+import { Bookmark, BookmarkPlus, BookOpen, Clock, RotateCcw } from 'lucide-react';
 import { useTemplates } from '../../context/TemplatesContext';
 import { TemplateSectionCategory } from '../../types/reports';
 
@@ -242,25 +242,81 @@ export const ConclusionsField: React.FC<ConclusionsFieldProps> = ({
   );
 };
 
+function formatLastModifiedTimestamp(
+  isoDate?: string
+): { short: string; full: string; iso: string } | null {
+  if (!isoDate) return null;
+  const parsedMs = Date.parse(isoDate);
+  if (!Number.isFinite(parsedMs)) return null;
+  const date = new Date(parsedMs);
+  return {
+    short: new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date),
+    full: new Intl.DateTimeFormat('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(date),
+    iso: date.toISOString(),
+  };
+}
+
 interface FormTopBarProps {
   docTitle: string;
   metaText: string;
+  updatedAt?: string;
   onResetDoc: () => void;
 }
 
-export const FormTopBar: React.FC<FormTopBarProps> = ({ docTitle, metaText, onResetDoc }) => (
-  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-6">
-    <div className="min-w-0">
-      <p className="text-xs text-slate-500">{metaText}</p>
-      <h2 className="mt-0.5 text-lg font-semibold text-slate-900 truncate">{docTitle}</h2>
+export const FormTopBar: React.FC<FormTopBarProps> = ({
+  docTitle,
+  metaText,
+  updatedAt,
+  onResetDoc,
+}) => {
+  const formattedUpdated = formatLastModifiedTimestamp(updatedAt);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-6">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-slate-500">{metaText}</p>
+        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <h2 className="text-lg font-semibold text-slate-900 truncate max-w-full">
+            {docTitle}
+          </h2>
+          {formattedUpdated && (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] text-slate-500 whitespace-nowrap shrink-0"
+              title={`Ostatnia modyfikacja dokumentu: ${formattedUpdated.full}`}
+            >
+              <Clock className="w-3 h-3 text-slate-400 shrink-0" aria-hidden="true" />
+              <span>Ostatnia modyfikacja:</span>
+              <time
+                dateTime={formattedUpdated.iso}
+                className="font-mono-tabular text-slate-600"
+              >
+                {formattedUpdated.short}
+              </time>
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onResetDoc}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+      >
+        <RotateCcw className="w-3.5 h-3.5" />
+        <span>Wyczyść kartę</span>
+      </button>
     </div>
-    <button
-      type="button"
-      onClick={onResetDoc}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-    >
-      <RotateCcw className="w-3.5 h-3.5" />
-      <span>Wyczyść kartę</span>
-    </button>
-  </div>
-);
+  );
+};

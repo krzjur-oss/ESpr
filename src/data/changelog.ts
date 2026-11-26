@@ -24,6 +24,8 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
       'Dołączono lokalnie używane kroje pisma (Plus Jakarta Sans, Source Serif 4, JetBrains Mono), eliminując zewnętrzne żądania do Google Fonts i zapewniając 100% niezależności offline PWA.',
       'Zaostrzono konfigurację TypeScript (strict oraz noUncheckedIndexedAccess) i dodano testy automatyczne Vitest + fake-indexeddb.',
       'Wprowadzono obowiązkową akceptację Regulaminu, Polityki Prywatności (RODO) i Licencji WLDE przy pierwszym uruchomieniu (lub na pustej bazie) wraz z wyróżnionym zaleceniem i przypomnieniem o wykonywaniu kopii zapasowej JSON.',
+      'Dodano eksport i import pełnego archiwum kopii zapasowej w formacie .zip w zakładce „Kopia JSON” (zawierającego pełną kopię do przywrócenia, profil, wszystkie karty dokumentów w osobnych plikach oraz bazy własnych wniosków, szablonów i paczek nadzoru).',
+      'Zintegrowano bibliotekę jsPDF (wraz z html2canvas-pro) umożliwiającą bezpośrednie generowanie i pobieranie pojedynczych kart, kompletów sprawozdań oraz zbiorczych raportów klas w Nadzorze dyrektora jako pliki .pdf wraz z widocznym paskiem postępu i licznikiem przetwarzanych dokumentów (z zachowaniem przycisku „Drukuj” jako alternatywy).',
     ],
   },
   {

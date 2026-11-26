@@ -1,9 +1,9 @@
 /**
- * Safely triggers a browser file download for JSON data using a Blob URL,
+ * Safely triggers a browser file download for any Blob using a Blob URL,
  * revoking the object URL only after a delay so mobile/Safari browsers have
  * time to initiate the download.
  */
-export function triggerJsonDownload(payload: unknown, filename: string): boolean {
+export function triggerBlobDownload(blob: Blob, filename: string): boolean {
   if (
     typeof document === 'undefined' ||
     typeof URL === 'undefined' ||
@@ -16,8 +16,6 @@ export function triggerJsonDownload(payload: unknown, filename: string): boolean
   let anchor: HTMLAnchorElement | null = null;
 
   try {
-    const json = JSON.stringify(payload, null, 2);
-    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     url = URL.createObjectURL(blob);
 
     anchor = document.createElement('a');
@@ -48,5 +46,18 @@ export function triggerJsonDownload(payload: unknown, filename: string): boolean
         }
       }, 10_000);
     }
+  }
+}
+
+/**
+ * Safely triggers a browser file download for JSON data using a Blob URL.
+ */
+export function triggerJsonDownload(payload: unknown, filename: string): boolean {
+  try {
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    return triggerBlobDownload(blob, filename);
+  } catch {
+    return false;
   }
 }

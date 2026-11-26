@@ -96,6 +96,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title || 'Karta sprawozdania z efektów nauczania'}
         metaText={`Karta efektów nauczania · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 

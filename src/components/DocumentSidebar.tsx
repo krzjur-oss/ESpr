@@ -2,8 +2,10 @@ import React, { useMemo, useState } from 'react';
 import {
   CalendarArrowUp,
   Copy,
+  FileDown,
   FilePlus2,
   FileText,
+  Loader2,
   Printer,
   Search,
   ShieldCheck,
@@ -18,6 +20,8 @@ import {
   SPECIALIST_ROLE_LABELS,
   SpecialistRole,
 } from '../types/reports';
+import { PdfExportProgress } from '../utils/pdfExport';
+import { PdfProgressBar } from './PdfProgressBar';
 
 export type DocumentSortOption = 'newest' | 'oldest' | 'title_asc';
 
@@ -41,7 +45,10 @@ interface DocumentSidebarProps {
   onTogglePrintSelect: (id: string) => void;
   onToggleSelectAllFiltered: () => void;
   onClearPrintSelection: () => void;
+  onDownloadPdfBatch: () => void;
   onPrintBatch: () => void;
+  isGeneratingPdf?: boolean;
+  pdfProgress?: PdfExportProgress | null;
   onSelectDocument: (id: string) => void;
   onAddDocument: (
     type: DocumentType,
@@ -77,7 +84,10 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onTogglePrintSelect,
   onToggleSelectAllFiltered,
   onClearPrintSelection,
+  onDownloadPdfBatch,
   onPrintBatch,
+  isGeneratingPdf = false,
+  pdfProgress = null,
   onSelectDocument,
   onAddDocument,
   onDuplicateDocument,
@@ -498,26 +508,59 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
           </button>
         </div>
 
-        <button
-          type="button"
-          disabled={batchDocumentsCount === 0}
-          onClick={onPrintBatch}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
-          title={
-            selectedBatchCount > 0
-              ? `Uruchom drukowanie ${selectedBatchCount} zaznaczonych dokumentów jako jeden komplet`
-              : `Uruchom drukowanie wszystkich przefiltrowanych dokumentów (${batchDocumentsCount}) jako jeden komplet`
-          }
-        >
-          <Printer className="w-3.5 h-3.5 shrink-0" />
-          <span className="tabular-nums truncate">
-            {selectedBatchCount > 0
-              ? `Drukuj zaznaczone (${selectedBatchCount})`
-              : yearFilter !== 'all' && yearFilter !== 'Bez roku'
-                ? `Drukuj komplet ${yearFilter} (${batchDocumentsCount})`
-                : `Drukuj komplet (${batchDocumentsCount})`}
-          </span>
-        </button>
+        {isGeneratingPdf && pdfProgress && (
+          <PdfProgressBar progress={pdfProgress} compact />
+        )}
+
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            disabled={batchDocumentsCount === 0 || isGeneratingPdf}
+            onClick={onDownloadPdfBatch}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
+            title={
+              selectedBatchCount > 0
+                ? `Pobierz bezpośrednio jeden plik PDF zawierający ${selectedBatchCount} zaznaczonych dokumentów`
+                : `Pobierz bezpośrednio jeden plik PDF zawierający wszystkie przefiltrowane dokumenty (${batchDocumentsCount})`
+            }
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+            ) : (
+              <FileDown className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span className="tabular-nums truncate">
+              {isGeneratingPdf
+                ? 'Generowanie PDF…'
+                : selectedBatchCount > 0
+                  ? `Pobierz PDF zaznaczonych (${selectedBatchCount})`
+                  : yearFilter !== 'all' && yearFilter !== 'Bez roku'
+                    ? `Pobierz PDF ${yearFilter} (${batchDocumentsCount})`
+                    : `Pobierz komplet PDF (${batchDocumentsCount})`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={batchDocumentsCount === 0 || isGeneratingPdf}
+            onClick={onPrintBatch}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap cursor-pointer"
+            title={
+              selectedBatchCount > 0
+                ? `Otwórz systemowe okno drukowania dla ${selectedBatchCount} zaznaczonych dokumentów`
+                : `Otwórz systemowe okno drukowania dla wszystkich przefiltrowanych dokumentów (${batchDocumentsCount})`
+            }
+          >
+            <Printer className="w-3.5 h-3.5 text-blue-900 shrink-0" />
+            <span className="tabular-nums truncate">
+              {selectedBatchCount > 0
+                ? `Drukuj zaznaczone (${selectedBatchCount})`
+                : yearFilter !== 'all' && yearFilter !== 'Bez roku'
+                  ? `Drukuj komplet ${yearFilter} (${batchDocumentsCount})`
+                  : `Drukuj komplet (${batchDocumentsCount})`}
+            </span>
+          </button>
+        </div>
       </div>
     </aside>
   );

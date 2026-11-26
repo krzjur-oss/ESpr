@@ -67,6 +67,7 @@ export const PodsumowanieSpecjalistyForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title}
         metaText={`Podsumowanie efektów pracy · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 

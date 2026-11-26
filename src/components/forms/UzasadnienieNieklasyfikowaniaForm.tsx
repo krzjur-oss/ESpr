@@ -68,6 +68,7 @@ export const UzasadnienieNieklasyfikowaniaForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title || 'Uzasadnienie nieklasyfikowania ucznia'}
         metaText={`Załącznik NKL · ${isAnnual ? 'Klasyfikacja roczna' : 'Za I półrocze'} · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 

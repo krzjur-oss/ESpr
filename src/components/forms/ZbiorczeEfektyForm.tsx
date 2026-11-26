@@ -115,6 +115,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title}
         metaText={`Sprawozdanie zbiorcze koordynatora · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 

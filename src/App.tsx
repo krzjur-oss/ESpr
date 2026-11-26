@@ -2,15 +2,19 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
   AlertTriangle,
+  CheckCircle2,
   Download,
   Eye,
+  FileDown,
   FilePlus2,
   FileText,
+  Loader2,
   PanelRightClose,
   PanelRightOpen,
   Printer,
   RefreshCw,
   UserCog,
+  X,
 } from 'lucide-react';
 import type { AboutSection } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
@@ -22,6 +26,7 @@ import { DocumentSidebar, DocumentSortOption } from './components/DocumentSideba
 import { ExportSupervisionModal } from './components/ExportSupervisionModal';
 import { NewYearRolloverModal } from './components/NewYearRolloverModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { PdfProgressBar } from './components/PdfProgressBar';
 import { ProfileView } from './components/ProfileView';
 import { SaveTemplateModal } from './components/SaveTemplateModal';
 import {
@@ -73,6 +78,7 @@ import {
   duplicateDocument,
   findSubjectAssignment,
 } from './utils/documentFactory';
+import { exportElementsToPdf, PdfExportProgress } from './utils/pdfExport';
 import { triggerWindowPrint } from './utils/printDocument';
 import {
   acceptTermsAndConditions,
@@ -183,6 +189,13 @@ export default function App() {
   const [printSupervisionReports, setPrintSupervisionReports] = useState<
     ClassCollectiveReport[] | null
   >(null);
+  const printAreaRef = useRef<HTMLDivElement | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState<PdfExportProgress | null>(null);
+  const [pdfNotice, setPdfNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const [backupDownloadFirst, setBackupDownloadFirst] = useState(true);
   const [confirmDialog, setConfirmDialog] = useState<
@@ -251,6 +264,14 @@ export default function App() {
       unsubCrossTab();
     };
   }, []);
+
+  useEffect(() => {
+    if (pdfNotice?.type !== 'success') return;
+    const timer = window.setTimeout(() => {
+      setPdfNotice(null);
+    }, 5500);
+    return () => window.clearTimeout(timer);
+  }, [pdfNotice]);
 
   // Persist changes incrementally to IndexedDB (only after initial hydration)
   useEffect(() => {
@@ -1086,6 +1107,140 @@ export default function App() {
     );
   };
 
+  const runPdfExportForRender = async (
+    setupPrintState: () => void,
+    filename: string,
+    expectedDocCount = 1
+  ) => {
+    if (isGeneratingPdf) return;
+    setPdfNotice(null);
+    setIsGeneratingPdf(true);
+    setPdfProgress({
+      phase: 'preparing',
+      currentDocument: 0,
+      totalDocuments: Math.max(1, expectedDocCount),
+      pagesGenerated: 0,
+      percent: 5,
+    });
+
+    try {
+      flushSync(() => {
+        setupPrintState();
+      });
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      });
+
+      const container = printAreaRef.current;
+      const sheets = container
+        ? Array.from(container.querySelectorAll<HTMLElement>('.a4-sheet'))
+        : [];
+      const result = await exportElementsToPdf(sheets, filename, {
+        onProgress: (nextProgress) => {
+          setPdfProgress(nextProgress);
+        },
+      });
+
+      if (result.ok) {
+        setPdfNotice({
+          type: 'success',
+          message: `Pobrano plik PDF „${result.filename}” (${result.pageCount} ${result.pageCount === 1 ? 'strona A4' : 'stron A4'}).`,
+        });
+      } else {
+        setPdfNotice({
+          type: 'error',
+          message: result.error,
+        });
+      }
+    } finally {
+      setPrintOverrideDocs(null);
+      setPrintSupervisionReports(null);
+      setIsGeneratingPdf(false);
+      setPdfProgress(null);
+    }
+  };
+
+  const handleDownloadPdfSupervisionClass = (report: ClassCollectiveReport) => {
+    const yearSuffix = supervisionYearFilter !== 'all' ? ` (${supervisionYearFilter})` : '';
+    void runPdfExportForRender(
+      () => {
+        setPrintOverrideDocs(null);
+        setPrintSupervisionReports([report]);
+      },
+      `Zbiorcze sprawozdanie - Klasa ${report.className}${yearSuffix}`,
+      1
+    );
+  };
+
+  const handleDownloadPdfAllSupervisionClasses = () => {
+    if (supervisionBatchReports.length === 0) return;
+    const yearSuffix =
+      supervisionYearFilter !== 'all' ? ` - Rok ${supervisionYearFilter}` : '';
+    const classesSummary =
+      selectedPrintClasses.length > 0 && supervisionBatchReports.length <= 5
+        ? ` [${supervisionBatchReports.map((r) => r.className).join(', ')}]`
+        : '';
+    void runPdfExportForRender(
+      () => {
+        setPrintOverrideDocs(null);
+        setPrintSupervisionReports(supervisionBatchReports);
+      },
+      `Zbiorcze sprawozdania klas${yearSuffix}${classesSummary} (${supervisionBatchReports.length})`,
+      supervisionBatchReports.length
+    );
+  };
+
+  const handleDownloadPdfActiveDocument = () => {
+    if (!activeDoc) return;
+    void runPdfExportForRender(
+      () => {
+        setPrintSupervisionReports(null);
+        setPrintOverrideDocs([activeDoc]);
+      },
+      activeDoc.title || 'Sprawozdanie szkolne',
+      1
+    );
+  };
+
+  const handleDownloadPdfBatch = () => {
+    if (batchDocuments.length === 0) return;
+    const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
+    void runPdfExportForRender(
+      () => {
+        setPrintSupervisionReports(null);
+        setPrintOverrideDocs(batchDocuments);
+      },
+      `Komplet sprawozdań${yearSuffix} - ${batchDocuments.length} dok.`,
+      batchDocuments.length
+    );
+  };
+
+  const handleDownloadPdf = () => {
+    if (activeTab === 'nadzor') {
+      handleDownloadPdfAllSupervisionClasses();
+      return;
+    }
+    if (docsToPrint.length === 0) return;
+    if (printMode === 'active' && activeDoc) {
+      handleDownloadPdfActiveDocument();
+      return;
+    }
+    const yearSuffix = yearFilter !== 'all' ? ` (${yearFilter})` : '';
+    void runPdfExportForRender(
+      () => {
+        setPrintSupervisionReports(null);
+        setPrintOverrideDocs(null);
+      },
+      `Komplet sprawozdań${yearSuffix} - ${docsToPrint.length} dok.`,
+      docsToPrint.length
+    );
+  };
+
   const handlePrint = () => {
     if (activeTab === 'nadzor') {
       handlePrintAllSupervisionClasses();
@@ -1134,9 +1289,44 @@ export default function App() {
       <TopBar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
+        onDownloadPdf={handleDownloadPdf}
         onPrint={handlePrint}
         hasDocuments={hasPrintableContent}
+        isGeneratingPdf={isGeneratingPdf}
+        pdfProgress={pdfProgress}
       />
+
+      {isGeneratingPdf && pdfProgress && <PdfProgressBar progress={pdfProgress} />}
+
+      {pdfNotice && (
+        <div
+          role={pdfNotice.type === 'error' ? 'alert' : 'status'}
+          className={`no-print border-b px-4 md:px-6 py-2.5 text-xs ${
+            pdfNotice.type === 'error'
+              ? 'border-red-300 bg-red-50 text-red-950'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-950'
+          }`}
+        >
+          <div className="mx-auto max-w-[1440px] flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-medium">
+              {pdfNotice.type === 'error' ? (
+                <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              )}
+              <span>{pdfNotice.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPdfNotice(null)}
+              aria-label="Zamknij komunikat PDF"
+              className="rounded p-1 text-slate-500 hover:bg-white/70 hover:text-slate-900 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {saveStatus === 'conflict' && (
         <div
@@ -1383,8 +1573,11 @@ export default function App() {
               onRequestDeletePackage={(pkg) =>
                 setConfirmDialog({ kind: 'delete_supervision_pkg', pkg })
               }
+              onDownloadClassPdf={handleDownloadPdfSupervisionClass}
               onPrintClass={handlePrintSupervisionClass}
-              onGenerateBatchPdf={handlePrintAllSupervisionClasses}
+              onGenerateBatchPdf={handleDownloadPdfAllSupervisionClasses}
+              isGeneratingPdf={isGeneratingPdf}
+              pdfProgress={pdfProgress}
             />
           </Suspense>
         )}
@@ -1441,7 +1634,10 @@ export default function App() {
               onTogglePrintSelect={handleTogglePrintSelect}
               onToggleSelectAllFiltered={handleToggleSelectAllFiltered}
               onClearPrintSelection={handleClearPrintSelection}
+              onDownloadPdfBatch={handleDownloadPdfBatch}
               onPrintBatch={handlePrintBatch}
+              isGeneratingPdf={isGeneratingPdf}
+              pdfProgress={pdfProgress}
               onSelectDocument={(id) =>
                 setState((prev) => ({ ...prev, activeDocumentId: id }))
               }
@@ -1496,18 +1692,35 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Layout mode segmented switcher + active document print */}
-                <div className="flex items-center gap-2">
+                {/* Layout mode segmented switcher + active document PDF/print */}
+                <div className="flex flex-wrap items-center gap-2">
                   {activeDoc && (
-                    <button
-                      type="button"
-                      onClick={handlePrintActiveDocument}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                      title="Otwórz okno drukowania wyłącznie dla bieżącej karty"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-blue-900" />
-                      <span>Drukuj tę kartę</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        disabled={isGeneratingPdf}
+                        onClick={handleDownloadPdfActiveDocument}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        title="Wygeneruj i pobierz plik PDF wyłącznie dla bieżącej karty"
+                      >
+                        {isGeneratingPdf ? (
+                          <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                        ) : (
+                          <FileDown className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span>{isGeneratingPdf ? 'Generowanie…' : 'Pobierz PDF'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isGeneratingPdf}
+                        onClick={handlePrintActiveDocument}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        title="Otwórz okno drukowania wyłącznie dla bieżącej karty"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-blue-900 shrink-0" />
+                        <span>Drukuj tę kartę</span>
+                      </button>
+                    </>
                   )}
                   <div className="inline-flex items-center rounded-lg bg-slate-100 p-1">
                     <button
@@ -1776,7 +1989,7 @@ export default function App() {
       </footer>
 
       {/* Dedicated print-only container using loaded styles & @media print */}
-      <div id="print-area" className="hidden print:block print-only-root">
+      <div id="print-area" ref={printAreaRef} className="hidden print:block print-only-root">
         {printSupervisionReports !== null
           ? printSupervisionReports.map((report, index) => (
               <ClassCollectivePrintSheet

@@ -103,6 +103,7 @@ export const UzasadnienieNdstForm: React.FC<Props> = ({
       <FormTopBar
         docTitle={doc.title || 'Uzasadnienie oceny niedostatecznej'}
         metaText={`Załącznik NDST · ${isAnnual ? 'Klasyfikacja roczna' : 'Za I półrocze'} · Rok szkolny ${doc.schoolYear || '—'}`}
+        updatedAt={doc.updatedAt}
         onResetDoc={onRequestReset}
       />
 
