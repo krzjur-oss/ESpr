@@ -673,7 +673,7 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       expect(secondBootBeforeAccept.requiresTermsAcceptance).toBe(true);
 
       // Zatwierdzenie zapisuje zgodę w IndexedDB i localStorage
-      const accepted = await acceptTermsAndConditions('1.7.1');
+      const accepted = await acceptTermsAndConditions('1.8.0');
       expect(accepted.accepted).toBe(true);
 
       resetStorageRuntimeForTests();
@@ -697,7 +697,7 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
 
     it('ponownie wymaga akceptacji regulaminu po pełnym resecie aplikacji', async () => {
       await loadAppState();
-      await acceptTermsAndConditions('1.7.1');
+      await acceptTermsAndConditions('1.8.0');
 
       resetStorageRuntimeForTests();
       const beforeReset = await loadAppState();

@@ -161,20 +161,20 @@ export const AboutView: React.FC<AboutViewProps> = ({
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <BookOpen className="w-4 h-4 text-blue-900 shrink-0" />
-                  <span>Stałe programy, archiwum, wnioski i szablony</span>
+                  <span>Stałe programy, archiwum, blokada i szablony</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Przypisanie programów i podręczników w Profilu z rozwijanymi podpowiedziami, sortowanie i filtrowanie archiwum według lat szkolnych, przenoszenie kart na nowy rok oraz baza gotowych wniosków i własnych szablonów z wymianą JSON.
+                  Przypisanie programów i podręczników w Profilu z rozwijanymi podpowiedziami, filtrowanie archiwum według lat szkolnych, blokowanie zatwierdzonych kart przed przypadkowymi zmianami, przenoszenie kart na nowy rok oraz baza wniosków i własnych szablonów.
                 </p>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Printer className="w-4 h-4 text-blue-900 shrink-0" />
-                  <span>Podgląd A4 i szybki wydruk kompletu</span>
+                  <span>Podgląd A4, bezpośredni PDF i wydruk</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Podgląd arkusza A4 na żywo oraz drukowanie pojedynczej karty albo zaznaczonego kompletu dokumentów z wybranego roku szkolnego jednym kliknięciem bez elementów interfejsu.
+                  Podgląd arkusza A4 na żywo, bezpośrednie pobieranie pojedynczych kart, kompletów oraz raportów Nadzoru dyrektora jako pliki PDF z paskiem postępu, a także szybki wydruk systemowy bez elementów interfejsu.
                 </p>
               </div>
 
@@ -184,7 +184,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
                   <span>100% offline · Local-First (IndexedDB)</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Wszystkie dane pozostają wyłącznie w lokalnej bazie IndexedDB w Twojej przeglądarce i nigdy nie opuszczają urządzenia. Możesz zainstalować program jako aplikację PWA oraz tworzyć kopie zapasowe JSON.
+                  Wszystkie dane pozostają wyłącznie w lokalnej bazie IndexedDB w Twojej przeglądarce i nigdy nie opuszczają urządzenia. Możesz zainstalować program jako aplikację PWA oraz tworzyć kopie zapasowe w formacie JSON lub spakowanego archiwum .zip.
                 </p>
               </div>
             </div>
@@ -214,7 +214,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
               </div>
               <div className="border-b border-slate-100 pb-2.5">
                 <dt className="text-xs font-medium text-slate-500">Przechowywanie danych</dt>
-                <dd className="mt-0.5 text-slate-900">IndexedDB (lokalnie, bez serwera) + eksport JSON</dd>
+                <dd className="mt-0.5 text-slate-900">IndexedDB (lokalnie, bez serwera) + kopia JSON / archiwum .zip</dd>
               </div>
               <div className="pt-1">
                 <dt className="text-xs font-medium text-slate-500">Kontakt e-mail</dt>

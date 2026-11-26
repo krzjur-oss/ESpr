@@ -23,7 +23,7 @@ export const BackupRecommendationCallout: React.FC<{
             Program działa w trybie <strong>Local-First</strong> — wszystkie dokumenty, profil nauczyciela oraz własne wnioski są zapisywane wyłącznie lokalnie w bazie przeglądarki (IndexedDB) na tym urządzeniu i nie są wysyłane na zewnętrzny serwer.
           </p>
           <p className="leading-relaxed text-amber-900">
-            Wyczyszczenie historii lub danych witryny, praca w trybie prywatnym, awaria sprzętu bądź zmiana komputera mogą spowodować <strong>nieodwracalną utratę danych</strong>. Aby temu zapobiec, regularnie pobieraj kopię zapasową w zakładce <strong>Kopia JSON</strong> i przechowuj plik <code className="font-mono-tabular text-[11px]">.json</code> na bezpiecznym nośniku.
+            Wyczyszczenie historii lub danych witryny, praca w trybie prywatnym, awaria sprzętu bądź zmiana komputera mogą spowodować <strong>nieodwracalną utratę danych</strong>. Aby temu zapobiec, regularnie pobieraj kopię zapasową w zakładce <strong>Kopia JSON</strong> i przechowuj plik <code className="font-mono-tabular text-[11px]">.json</code> lub archiwum <code className="font-mono-tabular text-[11px]">.zip</code> na bezpiecznym nośniku.
           </p>
         </div>
       </div>
@@ -133,10 +133,10 @@ export const RegulaminContent: React.FC = () => {
             Aplikacja nie używa plików cookie, narzędzi analitycznych ani reklamowych systemów śledzenia. Mechanizm PWA (Service Worker) zapisuje w pamięci podręcznej wyłącznie statyczne pliki aplikacji do pracy offline.
           </li>
           <li>
-            Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy IndexedDB w zakładce <strong>Kopia JSON</strong> albo czyszcząc dane witryny w przeglądarce.
+            Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON lub archiwum ZIP, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy IndexedDB w zakładce <strong>Kopia JSON</strong> albo czyszcząc dane witryny w przeglądarce.
           </li>
           <li>
-            Wyeksportowane pliki kopii JSON oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
+            Wyeksportowane pliki kopii JSON, archiwa ZIP oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
           </li>
         </ol>
       </section>
@@ -147,7 +147,7 @@ export const RegulaminContent: React.FC = () => {
           <li>Aplikacja udostępniana jest w stanie „takim, jakim jest” (<em>as is</em>), bez jakichkolwiek gwarancji.</li>
           <li>Autor nie ponosi odpowiedzialności za utratę danych, błędy działania, awarie sprzętu lub szkody wynikające z korzystania bądź niemożności użytkowania Aplikacji.</li>
           <li>
-            <strong>Zaleca się regularne tworzenie kopii zapasowych danych</strong> za pomocą eksportu do pliku <strong>JSON</strong> w zakładce <strong>Kopia JSON</strong> (np. po zakończeniu pracy nad serią sprawozdań lub przed czyszczeniem danych przeglądarki), aby uniknąć utraty wprowadzonych dokumentów.
+            <strong>Zaleca się regularne tworzenie kopii zapasowych danych</strong> za pomocą eksportu do pliku <strong>JSON</strong> lub archiwum <strong>.zip</strong> w zakładce <strong>Kopia JSON</strong> (np. po zakończeniu pracy nad serią sprawozdań lub przed czyszczeniem danych przeglądarki), aby uniknąć utraty wprowadzonych dokumentów.
           </li>
         </ol>
       </section>

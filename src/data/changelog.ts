@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.1';
+export const APP_VERSION = '1.8.0';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,22 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.8.0',
+    date: '26.11.2026',
+    title: 'Bezpośredni eksport PDF, archiwum ZIP, blokada kart oraz zgoda startowa',
+    summary:
+      'Dodano bezpośrednie pobieranie plików PDF z paskiem postępu, pełne archiwa kopii zapasowej .zip, blokadę zatwierdzonych kart dokumentów, wskaźnik ostatniej modyfikacji oraz obowiązkową akceptację regulaminu przy pierwszym uruchomieniu.',
+    changes: [
+      'Wprowadzono obowiązkową akceptację Regulaminu, Polityki Prywatności (RODO), Licencji WLDE oraz noty o kopiach zapasowych przy pierwszym uruchomieniu programu (lub na pustej bazie), wraz z wyróżnioną ramką i automatycznymi przypomnieniami o kopii JSON/ZIP.',
+      'Dodano eksport i import pełnego archiwum kopii zapasowej w formacie .zip w zakładce „Kopia JSON” (zawierającego pełną kopię do przywrócenia, profil, wszystkie karty dokumentów w osobnych plikach oraz bazy własnych wniosków, szablonów i paczek nadzoru).',
+      'Zintegrowano bibliotekę jsPDF (wraz z html2canvas-pro) umożliwiającą bezpośrednie generowanie i pobieranie pojedynczych kart, kompletów sprawozdań oraz zbiorczych raportów klas w Nadzorze dyrektora jako pliki .pdf.',
+      'Dodano widoczny pasek postępu (progress bar) i licznik przetwarzanych dokumentów podczas generowania plików PDF, z zachowaniem przycisku „Drukuj” jako alternatywy.',
+      'Dodano wskaźnik „Ostatnia modyfikacja” (data i godzina) obok tytułu karty w widoku edycji dokumentów.',
+      'Dodano funkcję blokady i archiwizacji pojedynczych kart dokumentów („Zablokuj (archiwum)” / „Odblokuj”) w panelu bocznym oraz nagłówku formularza — chroniącą zatwierdzone lub archiwalne dokumenty przed przypadkową edycją, czyszczeniem, usunięciem, nadpisaniem z Profilu oraz wstawianiem wniosków i szablonów (przy duplikowaniu lub przenoszeniu na nowy rok kopie pozostają odblokowane).',
+      'Rozbudowano zestaw testów automatycznych Vitest (40 testów) o weryfikację eksportu/importu archiwów .zip, generowania PDF, zgody startowej, przypomnień o kopiach oraz blokowania kart dokumentów.',
+    ],
+  },
   {
     version: '1.7.1',
     date: '25.11.2026',
@@ -23,9 +39,6 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
       'Zabezpieczono migrację ze starszego zapisu localStorage (zachowanie klucza źródłowego przy błędzie odczytu, uszkodzeniu lub nieudanym zapisie w IndexedDB) oraz wydłużono bezpieczne zwalnianie adresów Blob przy pobieraniu plików JSON.',
       'Dołączono lokalnie używane kroje pisma (Plus Jakarta Sans, Source Serif 4, JetBrains Mono), eliminując zewnętrzne żądania do Google Fonts i zapewniając 100% niezależności offline PWA.',
       'Zaostrzono konfigurację TypeScript (strict oraz noUncheckedIndexedAccess) i dodano testy automatyczne Vitest + fake-indexeddb.',
-      'Wprowadzono obowiązkową akceptację Regulaminu, Polityki Prywatności (RODO) i Licencji WLDE przy pierwszym uruchomieniu (lub na pustej bazie) wraz z wyróżnionym zaleceniem i przypomnieniem o wykonywaniu kopii zapasowej JSON.',
-      'Dodano eksport i import pełnego archiwum kopii zapasowej w formacie .zip w zakładce „Kopia JSON” (zawierającego pełną kopię do przywrócenia, profil, wszystkie karty dokumentów w osobnych plikach oraz bazy własnych wniosków, szablonów i paczek nadzoru).',
-      'Zintegrowano bibliotekę jsPDF (wraz z html2canvas-pro) umożliwiającą bezpośrednie generowanie i pobieranie pojedynczych kart, kompletów sprawozdań oraz zbiorczych raportów klas w Nadzorze dyrektora jako pliki .pdf wraz z widocznym paskiem postępu i licznikiem przetwarzanych dokumentów (z zachowaniem przycisku „Drukuj” jako alternatywy).',
     ],
   },
   {

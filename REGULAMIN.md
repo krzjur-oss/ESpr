@@ -1,6 +1,6 @@
 # Regulamin i Polityka Prywatności aplikacji „E-Sprawozdania — Kreator Sprawozdań Szkolnych”
 
-**Wersja 1.0 · obowiązuje od 24.11.2026 r.**
+**Wersja 1.8.0 · obowiązuje od 24.11.2026 r. (aktualizacja 26.11.2026 r.)**
 
 ---
 
@@ -52,8 +52,8 @@ Szczegółowe warunki licencyjne określa plik `LICENSE.md`. W sprawach zgody na
 2. Wszystkie dane wprowadzane do Aplikacji (m.in. dane profilu nauczyciela/specjalisty, klasy, przedmioty, przypisane numery programów i podręczniki, treść sprawozdań, karty informacyjne, podsumowania pracy specjalistów, archiwum lat szkolnych oraz własne wnioski do pracy) przechowywane są **wyłącznie lokalnie w bazie przeglądarki użytkownika (`IndexedDB`)** i nigdy nie opuszczają jego urządzenia. W przypadku starszych sesji zapisanych wcześniej w `localStorage` dane są jednorazowo przenoszone do `IndexedDB`, a stary wpis jest usuwany.
 3. Administratorem danych wprowadzanych do programu (w tym ewentualnych danych osobowych zawartych w treści sprawozdań) jest wyłącznie Użytkownik końcowy lub placówka oświatowa — Autor nie ma jakiegokolwiek technicznego dostępu do tych danych.
 4. Aplikacja nie używa plików cookie, narzędzi analitycznych ani reklamowych systemów śledzenia. Mechanizm PWA (Service Worker) zapisuje w pamięci podręcznej przeglądarki wyłącznie statyczne pliki samej aplikacji, umożliwiając jej działanie bez dostępu do internetu (100% offline).
-5. Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy `IndexedDB` za pomocą funkcji **„Wyczyść wszystkie dane”** w zakładce **Kopia JSON** albo czyszcząc dane witryny w przeglądarce.
-6. Wyeksportowane pliki kopii JSON oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
+5. Użytkownik może w każdej chwili wyeksportować swoje dane do pliku JSON lub archiwum ZIP, wczytać kopię zapasową lub trwale usunąć wszystkie dane z bazy `IndexedDB` za pomocą funkcji **„Wyczyść wszystkie dane”** w zakładce **Kopia JSON** albo czyszcząc dane witryny w przeglądarce.
+6. Wyeksportowane pliki kopii JSON, archiwa ZIP oraz paczki sprawozdań dla dyrektora nie są szyfrowane i mogą zawierać dane osobowe (w tym imiona i nazwiska uczniów oraz dane nauczyciela). Użytkownik zobowiązany jest przekazywać je wyłącznie bezpiecznym kanałem komunikacji oraz usuwać po zakończeniu użycia.
 
 ---
 
@@ -61,7 +61,7 @@ Szczegółowe warunki licencyjne określa plik `LICENSE.md`. W sprawach zgody na
 
 1. Aplikacja udostępniana jest w stanie „takim, jakim jest” (*as is*), bez jakichkolwiek gwarancji.
 2. Autor nie ponosi odpowiedzialności za utratę danych (np. wskutek wyczyszczenia danych przeglądarki lub awarii urządzenia), błędy działania, awarie sprzętu lub szkody wynikające z korzystania bądź niemożności korzystania z Aplikacji.
-3. Zaleca się regularne tworzenie kopii zapasowych danych za pomocą wbudowanej funkcji eksportu do pliku **JSON** w zakładce **Kopia JSON** (szczególnie po zakończeniu semestru lub przed aktualizacją systemu).
+3. Zaleca się regularne tworzenie kopii zapasowych danych za pomocą wbudowanej funkcji eksportu do pliku **JSON** lub archiwum **.zip** w zakładce **Kopia JSON** (szczególnie po zakończeniu semestru lub przed aktualizacją systemu).
 
 ---
 
