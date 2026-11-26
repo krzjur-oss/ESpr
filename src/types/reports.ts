@@ -74,6 +74,7 @@ export interface EfektyNauczaniaDoc {
   previousConclusionsStatus: string;
   futureConclusions: string;
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export interface ZbiorczeRow {
@@ -108,6 +109,7 @@ export interface ZbiorczeEfektyDoc {
   previousConclusionsStatus: string;
   futureConclusions: string;
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export interface SubjectHoursRow {
@@ -146,6 +148,7 @@ export interface KartaInformacyjnaDoc {
   directorTasks: AdditionalTaskRow[];
   teacherInitiativeTasks: AdditionalTaskRow[];
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export interface PodsumowanieSpecjalistyDoc {
@@ -168,6 +171,7 @@ export interface PodsumowanieSpecjalistyDoc {
   previousConclusionsStatus: string;
   futureConclusions: string;
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export interface UzasadnienieNieklasyfikowaniaDoc {
@@ -187,6 +191,7 @@ export interface UzasadnienieNieklasyfikowaniaDoc {
   absencePercent: string;
   additionalJustification: string;
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export type NdstObservationKey =
@@ -263,6 +268,7 @@ export interface UzasadnienieNdstDoc {
   nextSemesterActions: NdstNextSemesterActionKey[];
   nextSemesterOtherText: string;
   signatureDate: string;
+  isLocked?: boolean;
 }
 
 export type ReportDocument =

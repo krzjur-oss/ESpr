@@ -98,9 +98,12 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
     expect(created).toHaveLength(6);
 
     const source = created[0]!;
+    source.isLocked = true;
     const copy = duplicateDocument(source);
     expect(copy.id).not.toBe(source.id);
     expect(copy.title).toContain('(kopia)');
+    expect(copy.isLocked).toBe(false);
+    expect(source.isLocked).toBe(true);
     if (copy.type === 'efekty_nauczania' && source.type === 'efekty_nauczania') {
       copy.className = '8C';
       expect(source.className).toBe('4A');
@@ -113,6 +116,7 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
     profile.schoolYear = '2026/2027';
 
     const e1 = createDocumentByType('efekty_nauczania', profile);
+    e1.isLocked = true;
     if (e1.type === 'efekty_nauczania') {
       e1.className = '5A';
       e1.failingGradesCount = '2';
@@ -140,6 +144,8 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
     expect(rolled).toHaveLength(1);
     const nextDoc = rolled[0];
     expect(nextDoc?.schoolYear).toBe('2027/2028');
+    expect(nextDoc?.isLocked).toBe(false);
+    expect(e1.isLocked).toBe(true);
     if (nextDoc?.type === 'efekty_nauczania') {
       expect(nextDoc.failingGradesCount).toBe('0');
       expect(nextDoc.previousConclusionsStatus).toBe('Więcej ćwiczeń rachunkowych.');

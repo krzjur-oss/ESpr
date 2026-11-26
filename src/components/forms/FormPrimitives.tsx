@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Bookmark, BookmarkPlus, BookOpen, Clock, RotateCcw } from 'lucide-react';
+import { Bookmark, BookmarkPlus, BookOpen, Clock, Lock, RotateCcw, Unlock } from 'lucide-react';
 import { useTemplates } from '../../context/TemplatesContext';
 import { TemplateSectionCategory } from '../../types/reports';
 
@@ -37,10 +37,10 @@ export const Field: React.FC<FieldProps> = ({ label, htmlFor, hint, children }) 
 );
 
 export const inputClass =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:ring-1 focus:ring-blue-900/20 focus:outline-none transition-colors';
+  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:ring-1 focus:ring-blue-900/20 focus:outline-none disabled:bg-slate-50 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors';
 
 export const textareaClass =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:ring-1 focus:ring-blue-900/20 focus:outline-none transition-colors leading-relaxed';
+  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-900 focus:ring-1 focus:ring-blue-900/20 focus:outline-none disabled:bg-slate-50 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors leading-relaxed';
 
 function extractSelectionOrFullText(
   el: HTMLTextAreaElement | null,
@@ -112,7 +112,7 @@ export const TemplateTextareaField: React.FC<TemplateTextareaFieldProps> = ({
                   });
                 }}
                 title="Zapisz cały wpis lub zaznaczony fragment jako szablon własny"
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <BookmarkPlus className="w-3 h-3 text-blue-900" />
                 <span>Zapisz jako szablon</span>
@@ -129,7 +129,7 @@ export const TemplateTextareaField: React.FC<TemplateTextareaFieldProps> = ({
                 })
               }
               title="Wstaw zapisany wcześniej szablon własny"
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Bookmark className="w-3 h-3 text-blue-900" />
               <span>
@@ -194,7 +194,7 @@ export const ConclusionsField: React.FC<ConclusionsFieldProps> = ({
                 });
               }}
               title="Zapisz treść lub zaznaczony fragment jako szablon własny"
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <BookmarkPlus className="w-3.5 h-3.5 text-blue-900" />
               <span>Zapisz jako szablon</span>
@@ -211,7 +211,7 @@ export const ConclusionsField: React.FC<ConclusionsFieldProps> = ({
                     onChange(applyTemplateInsertion(value, text, mode)),
                 })
               }
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Bookmark className="w-3.5 h-3.5 text-blue-900" />
               <span>
@@ -223,7 +223,7 @@ export const ConclusionsField: React.FC<ConclusionsFieldProps> = ({
           <button
             type="button"
             onClick={onOpenPicker}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-900 hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5" />
             <span>Wstaw z bazy wniosków</span>
@@ -273,6 +273,8 @@ interface FormTopBarProps {
   docTitle: string;
   metaText: string;
   updatedAt?: string;
+  isLocked?: boolean;
+  onToggleLock?: () => void;
   onResetDoc: () => void;
 }
 
@@ -280,43 +282,115 @@ export const FormTopBar: React.FC<FormTopBarProps> = ({
   docTitle,
   metaText,
   updatedAt,
+  isLocked = false,
+  onToggleLock,
   onResetDoc,
 }) => {
   const formattedUpdated = formatLastModifiedTimestamp(updatedAt);
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-6">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-slate-500">{metaText}</p>
-        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <h2 className="text-lg font-semibold text-slate-900 truncate max-w-full">
-            {docTitle}
-          </h2>
-          {formattedUpdated && (
-            <span
-              className="inline-flex items-center gap-1 text-[11px] text-slate-500 whitespace-nowrap shrink-0"
-              title={`Ostatnia modyfikacja dokumentu: ${formattedUpdated.full}`}
-            >
-              <Clock className="w-3 h-3 text-slate-400 shrink-0" aria-hidden="true" />
-              <span>Ostatnia modyfikacja:</span>
-              <time
-                dateTime={formattedUpdated.iso}
-                className="font-mono-tabular text-slate-600"
+    <div className="border-b border-slate-200 pb-4 mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-slate-500">{metaText}</p>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <h2 className="text-lg font-semibold text-slate-900 truncate max-w-full">
+              {docTitle}
+            </h2>
+            {isLocked && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 whitespace-nowrap shrink-0">
+                <Lock className="w-3 h-3 text-amber-700 shrink-0" aria-hidden="true" />
+                <span>Zablokowana (archiwum)</span>
+              </span>
+            )}
+            {formattedUpdated && (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] text-slate-500 whitespace-nowrap shrink-0"
+                title={`Ostatnia modyfikacja dokumentu: ${formattedUpdated.full}`}
               >
-                {formattedUpdated.short}
-              </time>
-            </span>
+                <Clock className="w-3 h-3 text-slate-400 shrink-0" aria-hidden="true" />
+                <span>Ostatnia modyfikacja:</span>
+                <time
+                  dateTime={formattedUpdated.iso}
+                  className="font-mono-tabular text-slate-600"
+                >
+                  {formattedUpdated.short}
+                </time>
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {onToggleLock && (
+            <button
+              type="button"
+              onClick={onToggleLock}
+              aria-pressed={isLocked}
+              title={
+                isLocked
+                  ? 'Odblokuj kartę do dalszej edycji'
+                  : 'Zablokuj kartę jako zatwierdzoną lub archiwalną, aby zapobiec przypadkowym zmianom'
+              }
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                isLocked
+                  ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+              }`}
+            >
+              {isLocked ? (
+                <>
+                  <Unlock className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Odblokuj</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Zablokuj (archiwum)</span>
+                </>
+              )}
+            </button>
           )}
+          <button
+            type="button"
+            disabled={isLocked}
+            onClick={onResetDoc}
+            title={
+              isLocked
+                ? 'Odblokuj kartę, aby wyczyścić jej pola'
+                : 'Wyczyść wszystkie pola formularza tej karty'
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:border-slate-300 disabled:hover:text-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Wyczyść kartę</span>
+          </button>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onResetDoc}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-      >
-        <RotateCcw className="w-3.5 h-3.5" />
-        <span>Wyczyść kartę</span>
-      </button>
+
+      {isLocked && (
+        <div
+          role="status"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs text-amber-950"
+        >
+          <div className="flex items-start sm:items-center gap-2 min-w-0 flex-1">
+            <Lock className="w-3.5 h-3.5 mt-0.5 sm:mt-0 text-amber-700 shrink-0" aria-hidden="true" />
+            <p className="leading-relaxed">
+              <strong>Karta zablokowana (archiwum).</strong> Edycja pól, nadpisywanie danymi z Profilu oraz usuwanie są wyłączone. Możesz drukować dokument, pobierać PDF lub utworzyć jego edytowalną kopię.
+            </p>
+          </div>
+          {onToggleLock && (
+            <button
+              type="button"
+              onClick={onToggleLock}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>Odblokuj do edycji</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

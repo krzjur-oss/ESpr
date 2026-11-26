@@ -34,6 +34,7 @@ interface Props {
   profile: TeacherProfile;
   availableYears?: string[];
   onChange: (updated: UzasadnienieNdstDoc) => void;
+  onToggleLock?: () => void;
   onRequestReset: () => void;
 }
 
@@ -42,9 +43,11 @@ export const UzasadnienieNdstForm: React.FC<Props> = ({
   profile,
   availableYears = [],
   onChange,
+  onToggleLock,
   onRequestReset,
 }) => {
   const update = (patch: Partial<UzasadnienieNdstDoc>) => {
+    if (doc.isLocked) return;
     const next: UzasadnienieNdstDoc = {
       ...doc,
       ...patch,
@@ -104,9 +107,15 @@ export const UzasadnienieNdstForm: React.FC<Props> = ({
         docTitle={doc.title || 'Uzasadnienie oceny niedostatecznej'}
         metaText={`Załącznik NDST · ${isAnnual ? 'Klasyfikacja roczna' : 'Za I półrocze'} · Rok szkolny ${doc.schoolYear || '—'}`}
         updatedAt={doc.updatedAt}
+        isLocked={Boolean(doc.isLocked)}
+        onToggleLock={onToggleLock}
         onResetDoc={onRequestReset}
       />
 
+      <fieldset
+        disabled={Boolean(doc.isLocked)}
+        className="space-y-8 min-w-0 border-0 p-0 m-0 [&:disabled_button]:cursor-not-allowed [&:disabled_button]:opacity-60 [&:disabled_label]:cursor-not-allowed [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50"
+      >
       {/* 01. Dane ucznia i załącznika */}
       <section>
         <SectionHeader
@@ -584,6 +593,7 @@ export const UzasadnienieNdstForm: React.FC<Props> = ({
           </div>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 };

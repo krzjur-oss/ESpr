@@ -28,6 +28,7 @@ interface Props {
   availableYears?: string[];
   onChange: (updated: PodsumowanieSpecjalistyDoc) => void;
   onOpenConclusionsPicker: () => void;
+  onToggleLock?: () => void;
   onRequestReset: () => void;
 }
 
@@ -37,6 +38,7 @@ export const PodsumowanieSpecjalistyForm: React.FC<Props> = ({
   availableYears = [],
   onChange,
   onOpenConclusionsPicker,
+  onToggleLock,
   onRequestReset,
 }) => {
   const studentClassOptions = getProfileClassOptions(profile).map((opt) => ({
@@ -45,6 +47,7 @@ export const PodsumowanieSpecjalistyForm: React.FC<Props> = ({
     subtitle: opt.subtitle ?? 'Oddział zapisany w Profilu',
   }));
   const update = (patch: Partial<PodsumowanieSpecjalistyDoc>) => {
+    if (doc.isLocked) return;
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
     if ('role' in patch || 'studentInfo' in patch) {
       const roleLabel = SPECIALIST_ROLE_LABELS[patch.role ?? doc.role];
@@ -68,9 +71,15 @@ export const PodsumowanieSpecjalistyForm: React.FC<Props> = ({
         docTitle={doc.title}
         metaText={`Podsumowanie efektów pracy · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
         updatedAt={doc.updatedAt}
+        isLocked={Boolean(doc.isLocked)}
+        onToggleLock={onToggleLock}
         onResetDoc={onRequestReset}
       />
 
+      <fieldset
+        disabled={Boolean(doc.isLocked)}
+        className="space-y-8 min-w-0 border-0 p-0 m-0 [&:disabled_button]:cursor-not-allowed [&:disabled_button]:opacity-60 [&:disabled_label]:cursor-not-allowed [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50"
+      >
       {/* 01. Rola i dane identyfikacyjne */}
       <section>
         <SectionHeader
@@ -262,6 +271,7 @@ export const PodsumowanieSpecjalistyForm: React.FC<Props> = ({
           </div>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 };

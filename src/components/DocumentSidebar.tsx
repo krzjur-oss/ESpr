@@ -6,10 +6,12 @@ import {
   FilePlus2,
   FileText,
   Loader2,
+  Lock,
   Printer,
   Search,
   ShieldCheck,
   Trash2,
+  Unlock,
   X,
 } from 'lucide-react';
 import {
@@ -59,6 +61,7 @@ interface DocumentSidebarProps {
     }
   ) => void;
   onDuplicateDocument: (id: string) => void;
+  onToggleDocumentLock: (id: string) => void;
   onRequestDeleteDocument: (doc: ReportDocument) => void;
   onOpenNewYearModal: () => void;
   onOpenSupervisionExport: () => void;
@@ -91,6 +94,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   onSelectDocument,
   onAddDocument,
   onDuplicateDocument,
+  onToggleDocumentLock,
   onRequestDeleteDocument,
   onOpenNewYearModal,
   onOpenSupervisionExport,
@@ -132,6 +136,7 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
   const renderDocCard = (doc: ReportDocument) => {
     const isActive = doc.id === activeDocumentId;
     const isChecked = selectedIdSet.has(doc.id);
+    const isLocked = Boolean(doc.isLocked);
     return (
       <div
         key={doc.id}
@@ -140,7 +145,9 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             ? 'border-blue-900 bg-blue-50/70'
             : isChecked
               ? 'border-blue-300 bg-blue-50/25 hover:bg-blue-50/40'
-              : 'border-slate-200 bg-white hover:bg-slate-50'
+              : isLocked
+                ? 'border-amber-200/90 bg-amber-50/20 hover:bg-amber-50/35'
+                : 'border-slate-200 bg-white hover:bg-slate-50'
         }`}
       >
         <div className="flex items-start gap-2 px-2.5 py-2.5">
@@ -157,11 +164,20 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
             onClick={() => onSelectDocument(doc.id)}
             className="flex flex-1 items-start gap-1.5 text-left cursor-pointer min-w-0"
           >
-            <FileText
-              className={`w-4 h-4 mt-0.5 shrink-0 ${
-                isActive ? 'text-blue-900' : 'text-slate-400'
-              }`}
-            />
+            {isLocked ? (
+              <Lock
+                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                  isActive ? 'text-amber-700' : 'text-amber-600'
+                }`}
+                aria-label="Karta zablokowana"
+              />
+            ) : (
+              <FileText
+                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                  isActive ? 'text-blue-900' : 'text-slate-400'
+                }`}
+              />
+            )}
             <div className="min-w-0 flex-1">
               <p
                 className={`text-xs font-semibold truncate ${
@@ -172,26 +188,46 @@ export const DocumentSidebar: React.FC<DocumentSidebarProps> = ({
               </p>
               <p className="mt-0.5 text-[11px] text-slate-500 truncate">
                 {DOCUMENT_TYPE_LABELS[doc.type]}
+                {isLocked ? ' · Zablokowana' : ''}
               </p>
             </div>
           </button>
         </div>
 
-        <div className="flex items-center justify-end gap-1 border-t border-slate-100 px-2 py-1">
+        <div className="flex flex-wrap items-center justify-end gap-1 border-t border-slate-100 px-2 py-1">
+          <button
+            type="button"
+            onClick={() => onToggleDocumentLock(doc.id)}
+            aria-pressed={isLocked}
+            className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium whitespace-nowrap cursor-pointer ${
+              isLocked
+                ? 'text-amber-800 bg-amber-50 hover:bg-amber-100'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+            title={
+              isLocked
+                ? 'Odblokuj kartę do edycji'
+                : 'Zablokuj kartę (archiwum), aby chronić przed przypadkowymi zmianami'
+            }
+          >
+            {isLocked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+            <span>{isLocked ? 'Odblokuj' : 'Zablokuj'}</span>
+          </button>
           <button
             type="button"
             onClick={() => onDuplicateDocument(doc.id)}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
-            title="Duplikuj kartę (np. dla kolejnej klasy)"
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap cursor-pointer"
+            title="Duplikuj kartę (tworzy odblokowaną kopię roboczą)"
           >
             <Copy className="w-3 h-3" />
             <span>Duplikuj</span>
           </button>
           <button
             type="button"
+            disabled={isLocked}
             onClick={() => onRequestDeleteDocument(doc)}
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-red-50 hover:text-red-700 cursor-pointer"
-            title="Usuń kartę"
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500 whitespace-nowrap cursor-pointer"
+            title={isLocked ? 'Odblokuj kartę, aby ją usunąć' : 'Usuń kartę'}
           >
             <Trash2 className="w-3 h-3" />
             <span>Usuń</span>

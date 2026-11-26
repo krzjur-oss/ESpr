@@ -298,6 +298,7 @@ export function createEfektyNauczaniaDoc(
     previousConclusionsStatus: '',
     futureConclusions: '',
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
     ...overrides,
   };
 }
@@ -348,6 +349,7 @@ export function createZbiorczeEfektyDoc(
     previousConclusionsStatus: '',
     futureConclusions: '',
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
   };
 }
 
@@ -387,6 +389,7 @@ export function createKartaInformacyjnaDoc(
     directorTasks: [{ id: createId(), taskType: '', results: '', conclusions: '' }],
     teacherInitiativeTasks: [{ id: createId(), taskType: '', results: '', conclusions: '' }],
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
   };
 }
 
@@ -416,6 +419,7 @@ export function createPodsumowanieSpecjalistyDoc(
     previousConclusionsStatus: '',
     futureConclusions: '',
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
   };
 }
 
@@ -447,6 +451,7 @@ export function createUzasadnienieNieklasyfikowaniaDoc(
     absencePercent: '',
     additionalJustification: '',
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
   };
 }
 
@@ -494,6 +499,7 @@ export function createUzasadnienieNdstDoc(
     nextSemesterActions: [],
     nextSemesterOtherText: '',
     signatureDate: profile.signatureDate || getTodayPolishDate(),
+    isLocked: false,
   };
 }
 
@@ -549,6 +555,7 @@ export function duplicateDocument(doc: ReportDocument): ReportDocument {
   clone.title = `${doc.title} (kopia)`;
   clone.createdAt = now;
   clone.updatedAt = now;
+  clone.isLocked = false;
   return clone;
 }
 
@@ -585,6 +592,7 @@ export function cloneDocumentsForNewSchoolYear(
     clone.id = createId();
     clone.createdAt = now;
     clone.updatedAt = now;
+    clone.isLocked = false;
     clone.schoolYear = options.targetYear.trim() || profile.schoolYear;
     clone.signatureDate = signatureDate;
 

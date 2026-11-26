@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   Download,
+  Lock,
   Pencil,
   Plus,
   Search,
@@ -39,6 +40,7 @@ interface WnioskiDatabaseViewProps {
   customWnioski: CustomWniosekEntry[];
   customTemplates: CustomTemplateEntry[];
   canInsertIntoActive: boolean;
+  activeDocumentLocked?: boolean;
   activeDocumentTitle?: string;
   onInsertToActive: (text: string) => void;
   onAddCustomWniosek: (categoryId: string, text: string) => void;
@@ -60,6 +62,7 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
   customWnioski,
   customTemplates,
   canInsertIntoActive,
+  activeDocumentLocked = false,
   activeDocumentTitle,
   onInsertToActive,
   onAddCustomWniosek,
@@ -390,6 +393,17 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
       {/* TAB 1: Baza wniosków */}
       {subTab === 'wnioski' && (
         <>
+          {activeDocumentLocked && activeDocumentTitle && !canInsertIntoActive && (
+            <div
+              role="status"
+              className="mb-5 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-xs text-amber-950"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" aria-hidden="true" />
+              <span>
+                Aktywna karta <strong>„{activeDocumentTitle}”</strong> jest zablokowana (archiwum). Odblokuj ją w Kreatorze, aby wstawiać wnioski bezpośrednio przyciskiem „Wstaw do karty”.
+              </span>
+            </div>
+          )}
           <form
             onSubmit={handleCreateSubmit}
             className="mb-6 rounded-xl border border-slate-200 bg-white p-5 space-y-3"

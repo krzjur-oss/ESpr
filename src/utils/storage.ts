@@ -350,6 +350,7 @@ function sanitizeSingleDocument(
     schoolName: asStr(raw.schoolName, base.schoolName, MAX_SHORT_LENGTH),
     schoolYear: asStr(raw.schoolYear, base.schoolYear, 64),
     signatureDate: asStr(raw.signatureDate, base.signatureDate, 64),
+    isLocked: asBool(raw.isLocked, false),
   };
 
   switch (base.type) {

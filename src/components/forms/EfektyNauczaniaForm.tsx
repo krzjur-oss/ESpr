@@ -34,6 +34,7 @@ interface Props {
   availableYears?: string[];
   onChange: (updated: EfektyNauczaniaDoc) => void;
   onOpenConclusionsPicker: () => void;
+  onToggleLock?: () => void;
   onRequestReset: () => void;
 }
 
@@ -43,6 +44,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
   availableYears = [],
   onChange,
   onOpenConclusionsPicker,
+  onToggleLock,
   onRequestReset,
 }) => {
   const matchedAssignment = findSubjectAssignment(profile, doc.subject, doc.className);
@@ -57,6 +59,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
   };
 
   const update = (patch: Partial<EfektyNauczaniaDoc>) => {
+    if (doc.isLocked) return;
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
     if ('subject' in patch || 'className' in patch) {
       const nextSubject = patch.subject ?? doc.subject;
@@ -97,9 +100,15 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
         docTitle={doc.title || 'Karta sprawozdania z efektów nauczania'}
         metaText={`Karta efektów nauczania · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
         updatedAt={doc.updatedAt}
+        isLocked={Boolean(doc.isLocked)}
+        onToggleLock={onToggleLock}
         onResetDoc={onRequestReset}
       />
 
+      <fieldset
+        disabled={Boolean(doc.isLocked)}
+        className="space-y-8 min-w-0 border-0 p-0 m-0 [&:disabled_button]:cursor-not-allowed [&:disabled_button]:opacity-60 [&:disabled_label]:cursor-not-allowed [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50"
+      >
       {/* 01. Dane podstawowe */}
       <section>
         <SectionHeader
@@ -503,6 +512,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
           </div>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 };

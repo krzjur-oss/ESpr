@@ -30,6 +30,7 @@ interface Props {
   profile: TeacherProfile;
   availableYears?: string[];
   onChange: (updated: KartaInformacyjnaDoc) => void;
+  onToggleLock?: () => void;
   onRequestReset: () => void;
 }
 
@@ -38,6 +39,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
   profile,
   availableYears = [],
   onChange,
+  onToggleLock,
   onRequestReset,
 }) => {
   const semesterPeriods = getSemesterPeriodTexts(doc.schoolYear || profile.schoolYear);
@@ -67,6 +69,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
   ]);
 
   const update = (patch: Partial<KartaInformacyjnaDoc>) => {
+    if (doc.isLocked) return;
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
     if ('period' in patch) {
       next.title = `Karta informacyjna · ${(patch.period ?? doc.period) || 'okres'}`;
@@ -116,9 +119,15 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
         docTitle={doc.title}
         metaText={`Karta informacyjna nauczyciela · Rok szkolny ${doc.schoolYear || '—'}`}
         updatedAt={doc.updatedAt}
+        isLocked={Boolean(doc.isLocked)}
+        onToggleLock={onToggleLock}
         onResetDoc={onRequestReset}
       />
 
+      <fieldset
+        disabled={Boolean(doc.isLocked)}
+        className="space-y-8 min-w-0 border-0 p-0 m-0 [&:disabled_button]:cursor-not-allowed [&:disabled_button]:opacity-60 [&:disabled_label]:cursor-not-allowed [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50"
+      >
       {/* 01. Dane ogólne i godziny */}
       <section>
         <SectionHeader
@@ -479,6 +488,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
           </Field>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 };

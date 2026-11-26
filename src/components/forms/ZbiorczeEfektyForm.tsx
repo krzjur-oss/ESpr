@@ -38,6 +38,7 @@ interface Props {
   availableYears?: string[];
   onChange: (updated: ZbiorczeEfektyDoc) => void;
   onOpenConclusionsPicker: () => void;
+  onToggleLock?: () => void;
   onRequestReset: () => void;
 }
 
@@ -48,6 +49,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
   availableYears = [],
   onChange,
   onOpenConclusionsPicker,
+  onToggleLock,
   onRequestReset,
 }) => {
   const subjectCardsCount = getMatchingSubjectCardsForCoordinator(allDocuments, doc).length;
@@ -68,6 +70,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
   ];
 
   const update = (patch: Partial<ZbiorczeEfektyDoc>) => {
+    if (doc.isLocked) return;
     const next = { ...doc, ...patch, updatedAt: new Date().toISOString() };
     if ('mode' in patch || 'subjectOrStage' in patch) {
       const m = patch.mode ?? doc.mode;
@@ -106,6 +109,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
   };
 
   const handleAggregateFromCards = () => {
+    if (doc.isLocked) return;
     const aggregated = aggregateIntoCoordinatorDoc(allDocuments, doc);
     onChange(aggregated);
   };
@@ -116,9 +120,15 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
         docTitle={doc.title}
         metaText={`Sprawozdanie zbiorcze koordynatora · Semestr ${doc.semester} · Rok szkolny ${doc.schoolYear || '—'}`}
         updatedAt={doc.updatedAt}
+        isLocked={Boolean(doc.isLocked)}
+        onToggleLock={onToggleLock}
         onResetDoc={onRequestReset}
       />
 
+      <fieldset
+        disabled={Boolean(doc.isLocked)}
+        className="space-y-8 min-w-0 border-0 p-0 m-0 [&:disabled_button]:cursor-not-allowed [&:disabled_button]:opacity-60 [&:disabled_label]:cursor-not-allowed [&:disabled_select]:cursor-not-allowed [&:disabled_select]:bg-slate-50"
+      >
       {/* 01. Tryb i dane koordynatora */}
       <section>
         <SectionHeader
@@ -448,6 +458,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
           </div>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 };

@@ -24,6 +24,7 @@ interface ProfileComboInputProps {
   className?: string;
   dropdownHeader?: string;
   onSelectOption?: (option: ProfileComboOption) => void;
+  disabled?: boolean;
 }
 
 export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
@@ -34,12 +35,19 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
   className,
   dropdownHeader = 'Zapisane w Profilu',
   onSelectOption,
+  disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showAllMode, setShowAllMode] = useState(true);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
+
+  useEffect(() => {
+    if (disabled && isOpen) {
+      setIsOpen(false);
+    }
+  }, [disabled, isOpen]);
 
   const visibleOptions = useMemo(() => {
     if (showAllMode || !value.trim()) return options;
@@ -63,6 +71,7 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
   }, [isOpen]);
 
   const handleSelect = (opt: ProfileComboOption) => {
+    if (disabled) return;
     if (onSelectOption) {
       onSelectOption(opt);
     } else {
@@ -73,7 +82,7 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (options.length === 0) return;
+    if (disabled || options.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (!isOpen) {
@@ -104,11 +113,13 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
       <input
         type="text"
         role="combobox"
-        aria-expanded={isOpen}
-        aria-controls={isOpen ? listId : undefined}
+        aria-expanded={isOpen && !disabled}
+        aria-controls={isOpen && !disabled ? listId : undefined}
         aria-autocomplete="list"
+        disabled={disabled}
         value={value}
         onChange={(e) => {
+          if (disabled) return;
           const next = e.target.value;
           onChange(next);
           if (hasOptions) {
@@ -118,7 +129,7 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
           }
         }}
         onFocus={() => {
-          if (hasOptions && !value.trim()) {
+          if (!disabled && hasOptions && !value.trim()) {
             setShowAllMode(true);
             setIsOpen(true);
           }
@@ -132,22 +143,24 @@ export const ProfileComboInput: React.FC<ProfileComboInputProps> = ({
         <button
           type="button"
           tabIndex={-1}
+          disabled={disabled}
           aria-label={dropdownHeader}
           title={dropdownHeader}
           onClick={() => {
+            if (disabled) return;
             setShowAllMode(true);
             setIsOpen((prev) => !prev);
             setHighlightedIndex(-1);
           }}
-          className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400 hover:text-blue-900 transition-colors cursor-pointer"
+          className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400 hover:text-blue-900 disabled:opacity-40 disabled:hover:text-slate-400 disabled:cursor-not-allowed transition-colors cursor-pointer"
         >
           <ChevronDown
-            className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180 text-blue-900' : ''}`}
+            className={`w-4 h-4 transition-transform ${isOpen && !disabled ? 'rotate-180 text-blue-900' : ''}`}
           />
         </button>
       )}
 
-      {isOpen && visibleOptions.length > 0 && (
+      {!disabled && isOpen && visibleOptions.length > 0 && (
         <div
           id={listId}
           role="listbox"

@@ -227,4 +227,21 @@ describe('Group A: Walidacja i sanitizacja', () => {
     expect(profile.subjectAssignments).toHaveLength(2);
     expect(profile.subjectAssignments[0]?.subject).toBe('Fizyka');
   });
+
+  it('zachowuje flagę isLocked przy sanitizacji i domyślnie ustawia false dla brakujących/błędnych wartości', () => {
+    const profile = createDefaultProfile();
+    const sanitized = sanitizeDocuments(
+      [
+        { type: 'efekty_nauczania', subject: 'Matematyka', isLocked: true },
+        { type: 'karta_informacyjna', isLocked: 'tak' },
+        { type: 'uzasadnienie_ndst' },
+      ],
+      profile
+    );
+
+    expect(sanitized).toHaveLength(3);
+    expect(sanitized[0]?.isLocked).toBe(true);
+    expect(sanitized[1]?.isLocked).toBe(false);
+    expect(sanitized[2]?.isLocked).toBe(false);
+  });
 });

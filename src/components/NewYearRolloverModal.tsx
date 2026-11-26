@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarArrowUp, Check, X } from 'lucide-react';
+import { CalendarArrowUp, Check, Lock, X } from 'lucide-react';
 import {
   DOCUMENT_TYPE_LABELS,
   ReportDocument,
@@ -299,11 +299,15 @@ export const NewYearRolloverModal: React.FC<NewYearRolloverModalProps> = ({
                         {checked && <Check className="w-3 h-3" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-slate-900 truncate">
-                          {doc.title || DOCUMENT_TYPE_LABELS[doc.type]}
+                        <p className="text-xs font-semibold text-slate-900 truncate flex items-center gap-1.5">
+                          {doc.isLocked && (
+                            <Lock className="w-3 h-3 text-amber-700 shrink-0" aria-hidden="true" />
+                          )}
+                          <span className="truncate">{doc.title || DOCUMENT_TYPE_LABELS[doc.type]}</span>
                         </p>
                         <p className="text-[11px] text-slate-500 truncate">
                           {DOCUMENT_TYPE_LABELS[doc.type]}
+                          {doc.isLocked ? ' · Zablokowana (kopia na nowy rok będzie odblokowana)' : ''}
                         </p>
                       </div>
                     </button>

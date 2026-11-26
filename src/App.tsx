@@ -438,7 +438,10 @@ export default function App() {
       return {
         ...prev,
         documents: prev.documents.map((doc) => {
-          // Protect archived cards from previous school years from being overwritten
+          // Protect locked (archived) cards and previous school years from being overwritten
+          if (doc.isLocked) {
+            return doc;
+          }
           const isCurrentOrUnassignedYear =
             !targetYear || !doc.schoolYear.trim() || doc.schoolYear.trim() === targetYear;
           if (!isCurrentOrUnassignedYear) {
@@ -500,7 +503,31 @@ export default function App() {
   const handleUpdateDocument = (updated: ReportDocument) => {
     setState((prev) => ({
       ...prev,
-      documents: prev.documents.map((d) => (d.id === updated.id ? updated : d)),
+      documents: prev.documents.map((d) =>
+        d.id === updated.id ? (d.isLocked ? d : updated) : d
+      ),
+    }));
+  };
+
+  const handleToggleDocumentLock = (id: string) => {
+    const target = stateRef.current.documents.find((d) => d.id === id);
+    if (!target) return;
+    const nextLocked = !target.isLocked;
+    if (nextLocked && stateRef.current.activeDocumentId === id) {
+      setPickerOpen(false);
+      setTemplatePickerTarget(null);
+    }
+    setState((prev) => ({
+      ...prev,
+      documents: prev.documents.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              isLocked: !d.isLocked,
+              updatedAt: new Date().toISOString(),
+            }
+          : d
+      ),
     }));
   };
 
@@ -608,7 +635,7 @@ export default function App() {
   };
 
   const handleInsertConclusion = (text: string, mode: 'append' | 'replace') => {
-    if (!activeDoc) return;
+    if (!activeDoc || activeDoc.isLocked) return;
     if (
       activeDoc.type === 'efekty_nauczania' ||
       activeDoc.type === 'zbiorcze_efekty' ||
@@ -800,9 +827,16 @@ export default function App() {
     if (!confirmDialog) return;
     if (confirmDialog.kind === 'delete_doc') {
       const targetId = confirmDialog.doc.id;
+      const liveDoc = stateRef.current.documents.find((d) => d.id === targetId);
+      if (!liveDoc || liveDoc.isLocked) {
+        setConfirmDialog(null);
+        return;
+      }
       setSelectedPrintIds((prev) => prev.filter((id) => id !== targetId));
       setState((prev) => {
-        const remaining = prev.documents.filter((d) => d.id !== targetId);
+        const remaining = prev.documents.filter(
+          (d) => d.id !== targetId || Boolean(d.isLocked)
+        );
         const nextActive =
           prev.activeDocumentId === targetId
             ? remaining[0]?.id ?? null
@@ -814,7 +848,12 @@ export default function App() {
         };
       });
     } else if (confirmDialog.kind === 'reset_doc') {
-      const cleared = clearDocumentFields(confirmDialog.doc, state.profile);
+      const liveDoc = stateRef.current.documents.find((d) => d.id === confirmDialog.doc.id);
+      if (!liveDoc || liveDoc.isLocked) {
+        setConfirmDialog(null);
+        return;
+      }
+      const cleared = clearDocumentFields(liveDoc, state.profile);
       handleUpdateDocument(cleared);
     } else if (confirmDialog.kind === 'delete_supervision_pkg') {
       const targetId = confirmDialog.pkg.id;
@@ -1268,6 +1307,7 @@ export default function App() {
 
   const canInsertConclusionsToActive =
     !!activeDoc &&
+    !activeDoc.isLocked &&
     (activeDoc.type === 'efekty_nauczania' ||
       activeDoc.type === 'zbiorcze_efekty' ||
       activeDoc.type === 'podsumowanie_specjalisty');
@@ -1535,6 +1575,7 @@ export default function App() {
               customTemplates={state.customTemplates}
               canInsertIntoActive={canInsertConclusionsToActive}
               activeDocumentTitle={activeDoc?.title}
+              activeDocumentLocked={Boolean(activeDoc?.isLocked)}
               onInsertToActive={(text) => handleInsertConclusion(text, 'append')}
               onAddCustomWniosek={handleAddCustomWniosek}
               onDeleteCustomWniosek={handleDeleteCustomWniosek}
@@ -1646,9 +1687,12 @@ export default function App() {
               }
               onAddDocument={handleAddDocument}
               onDuplicateDocument={handleDuplicateDocument}
-              onRequestDeleteDocument={(doc) =>
-                setConfirmDialog({ kind: 'delete_doc', doc })
-              }
+              onToggleDocumentLock={handleToggleDocumentLock}
+              onRequestDeleteDocument={(doc) => {
+                if (!doc.isLocked) {
+                  setConfirmDialog({ kind: 'delete_doc', doc });
+                }
+              }}
               onOpenNewYearModal={() => setRolloverOpen(true)}
               onOpenSupervisionExport={() => setExportSupervisionOpen(true)}
             />
@@ -1802,7 +1846,11 @@ export default function App() {
                         <TemplatesProvider
                           value={{
                             templatesCount: state.customTemplates.length,
-                            openTemplatePicker: setTemplatePickerTarget,
+                            openTemplatePicker: (target) => {
+                              if (!activeDoc.isLocked) {
+                                setTemplatePickerTarget(target);
+                              }
+                            },
                             openSaveTemplate: setSaveTemplateDraft,
                           }}
                         >
@@ -1812,10 +1860,15 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onOpenConclusionsPicker={() => setPickerOpen(true)}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onOpenConclusionsPicker={() => {
+                                if (!activeDoc.isLocked) setPickerOpen(true);
+                              }}
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                           {activeDoc.type === 'zbiorcze_efekty' && (
@@ -1825,10 +1878,15 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onOpenConclusionsPicker={() => setPickerOpen(true)}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onOpenConclusionsPicker={() => {
+                                if (!activeDoc.isLocked) setPickerOpen(true);
+                              }}
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                           {activeDoc.type === 'karta_informacyjna' && (
@@ -1837,9 +1895,12 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                           {activeDoc.type === 'podsumowanie_specjalisty' && (
@@ -1848,10 +1909,15 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onOpenConclusionsPicker={() => setPickerOpen(true)}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onOpenConclusionsPicker={() => {
+                                if (!activeDoc.isLocked) setPickerOpen(true);
+                              }}
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                           {activeDoc.type === 'uzasadnienie_nieklasyfikowania' && (
@@ -1860,9 +1926,12 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                           {activeDoc.type === 'uzasadnienie_ndst' && (
@@ -1871,9 +1940,12 @@ export default function App() {
                               profile={state.profile}
                               availableYears={availableYears}
                               onChange={handleUpdateDocument}
-                              onRequestReset={() =>
-                                setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })
-                              }
+                              onToggleLock={() => handleToggleDocumentLock(activeDoc.id)}
+                              onRequestReset={() => {
+                                if (!activeDoc.isLocked) {
+                                  setConfirmDialog({ kind: 'reset_doc', doc: activeDoc });
+                                }
+                              }}
                             />
                           )}
                         </TemplatesProvider>
@@ -2028,7 +2100,11 @@ export default function App() {
         suggestedCategory={templatePickerTarget?.suggestedCategory ?? 'ogolne'}
         customTemplates={state.customTemplates}
         onClose={() => setTemplatePickerTarget(null)}
-        onInsert={(text, mode) => templatePickerTarget?.onApply(text, mode)}
+        onInsert={(text, mode) => {
+          if (!activeDoc?.isLocked) {
+            templatePickerTarget?.onApply(text, mode);
+          }
+        }}
         onAddTemplate={handleAddCustomTemplate}
         onDeleteTemplate={handleDeleteCustomTemplate}
       />

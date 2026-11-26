@@ -79,6 +79,7 @@ describe('ZIP backup export & restore', () => {
 
   it('odtwarza pełny stan aplikacji z wygenerowanego archiwum .zip', () => {
     const state = createRichTestState();
+    state.documents[1]!.isLocked = true;
     const zipBytes = buildBackupZipBytes(state);
     const buffer = zipBytes.slice().buffer;
 
@@ -92,6 +93,8 @@ describe('ZIP backup export & restore', () => {
 
     expect(validated.state.profile.fullName).toBe('Anna Kowalska');
     expect(validated.state.documents).toHaveLength(2);
+    expect(validated.state.documents[0]?.isLocked).toBe(false);
+    expect(validated.state.documents[1]?.isLocked).toBe(true);
     expect(validated.state.customWnioski).toHaveLength(1);
     expect(validated.state.customTemplates).toHaveLength(1);
     expect(validated.state.supervisionClassNotes['2026/2027::I::4A']).toBe('Uwagi klasy 4A');
