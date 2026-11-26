@@ -3,23 +3,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../types/reports';
 import { createDefaultProfile, createDocumentByType, createInitialAppState } from '../documentFactory';
 import {
+  BACKUP_REMINDER_INTERVAL_DAYS,
   DB_NAME,
   DB_VERSION,
   LEGACY_STORAGE_KEY,
+  acceptTermsAndConditions,
   exportRawIndexedDbBackup,
   getCurrentRevision,
   getCurrentStorageBackend,
   getSaveStatus,
+  hasUserWorkWorthBackingUp,
   loadAppState,
   mergeImportedTemplates,
   mergeImportedWnioski,
   readIndexedDbStateOnly,
+  recordBackupExportNow,
   reloadAppStateFromDb,
   resetAllStoredState,
   resetStorageRuntimeForTests,
   retryIndexedDbPersistence,
   saveAppStateImmediate,
   scheduleSaveAppState,
+  shouldShowBackupReminder,
+  snoozeBackupReminder,
   subscribeCrossTabChanges,
   validateAndParseImportedJson,
   validateAndParseSharedPhrasesJson,
@@ -653,6 +659,92 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
         configurable: true,
         writable: true,
       });
+    });
+  });
+
+  describe('Group E: Pierwsze uruchomienie, akceptacja regulaminu i przypomnienia kopii JSON', () => {
+    it('wymaga akceptacji regulaminu przy czystej bazie i utrzymuje wymóg do czasu zatwierdzenia', async () => {
+      const firstBoot = await loadAppState();
+      expect(firstBoot.requiresTermsAcceptance).toBe(true);
+
+      // Odświeżenie strony przed zatwierdzeniem nadal wymaga zgody
+      resetStorageRuntimeForTests();
+      const secondBootBeforeAccept = await loadAppState();
+      expect(secondBootBeforeAccept.requiresTermsAcceptance).toBe(true);
+
+      // Zatwierdzenie zapisuje zgodę w IndexedDB i localStorage
+      const accepted = await acceptTermsAndConditions('1.7.1');
+      expect(accepted.accepted).toBe(true);
+
+      resetStorageRuntimeForTests();
+      const bootAfterAccept = await loadAppState();
+      expect(bootAfterAccept.requiresTermsAcceptance).toBe(false);
+    });
+
+    it('nie blokuje istniejących użytkowników z zapisaną bazą sprzed wprowadzenia regulaminu', async () => {
+      const existingState = createInitialAppState();
+      existingState.profile.fullName = 'Anna Nowak';
+      await saveAppStateImmediate(existingState, {
+        replaceAll: true,
+        forceOverwriteRevision: true,
+      });
+
+      resetStorageRuntimeForTests();
+      const boot = await loadAppState();
+      expect(boot.state.profile.fullName).toBe('Anna Nowak');
+      expect(boot.requiresTermsAcceptance).toBe(false);
+    });
+
+    it('ponownie wymaga akceptacji regulaminu po pełnym resecie aplikacji', async () => {
+      await loadAppState();
+      await acceptTermsAndConditions('1.7.1');
+
+      resetStorageRuntimeForTests();
+      const beforeReset = await loadAppState();
+      expect(beforeReset.requiresTermsAcceptance).toBe(false);
+
+      const fresh = createInitialAppState();
+      await resetAllStoredState(fresh);
+
+      resetStorageRuntimeForTests();
+      const afterReset = await loadAppState();
+      expect(afterReset.requiresTermsAcceptance).toBe(true);
+    });
+
+    it('wyświetla przypomnienie o kopii JSON dopiero po zmianie danych, resetuje je po eksporcie i obsługuje odroczenie', async () => {
+      const cleanState = createInitialAppState();
+      expect(hasUserWorkWorthBackingUp(cleanState)).toBe(false);
+      expect(
+        shouldShowBackupReminder(cleanState, { lastBackupExportAt: null, snoozedUntil: null }).show
+      ).toBe(false);
+
+      const editedState: AppState = {
+        ...cleanState,
+        profile: { ...cleanState.profile, fullName: 'Jan Kowalski' },
+      };
+      expect(hasUserWorkWorthBackingUp(editedState)).toBe(true);
+
+      const neverBackedUp = shouldShowBackupReminder(editedState, {
+        lastBackupExportAt: null,
+        snoozedUntil: null,
+      });
+      expect(neverBackedUp.show).toBe(true);
+      expect(neverBackedUp.reason).toBe('never_backed_up');
+
+      // Zapis eksportu wycisza przypomnienie
+      const exportedMeta = await recordBackupExportNow();
+      expect(shouldShowBackupReminder(editedState, exportedMeta).show).toBe(false);
+
+      // Po upływie interwału pojawia się przypomnienie stale_backup
+      const exportTs = Date.parse(exportedMeta.lastBackupExportAt!);
+      const futureMs = exportTs + (BACKUP_REMINDER_INTERVAL_DAYS + 1) * 24 * 60 * 60 * 1000;
+      const stale = shouldShowBackupReminder(editedState, exportedMeta, futureMs);
+      expect(stale.show).toBe(true);
+      expect(stale.reason).toBe('stale_backup');
+
+      // Odroczenie ukrywa przypomnienie przez okres snooze
+      const snoozedMeta = await snoozeBackupReminder(7);
+      expect(shouldShowBackupReminder(editedState, snoozedMeta).show).toBe(false);
     });
   });
 });

@@ -23,6 +23,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
       'Zabezpieczono migrację ze starszego zapisu localStorage (zachowanie klucza źródłowego przy błędzie odczytu, uszkodzeniu lub nieudanym zapisie w IndexedDB) oraz wydłużono bezpieczne zwalnianie adresów Blob przy pobieraniu plików JSON.',
       'Dołączono lokalnie używane kroje pisma (Plus Jakarta Sans, Source Serif 4, JetBrains Mono), eliminując zewnętrzne żądania do Google Fonts i zapewniając 100% niezależności offline PWA.',
       'Zaostrzono konfigurację TypeScript (strict oraz noUncheckedIndexedAccess) i dodano testy automatyczne Vitest + fake-indexeddb.',
+      'Wprowadzono obowiązkową akceptację Regulaminu, Polityki Prywatności (RODO) i Licencji WLDE przy pierwszym uruchomieniu (lub na pustej bazie) wraz z wyróżnionym zaleceniem i przypomnieniem o wykonywaniu kopii zapasowej JSON.',
     ],
   },
   {

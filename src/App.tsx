@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { AboutSection } from './components/AboutView';
 import { BackupJsonView } from './components/BackupJsonView';
+import { BackupReminderBanner } from './components/BackupReminderBanner';
 import { ConclusionPickerModal } from './components/ConclusionPickerModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import type { SupervisionImportFeedback } from './components/DirectorSupervisionView';
@@ -31,6 +32,7 @@ import {
 } from './components/SharePhrasesModal';
 import { SupervisionDiffModal } from './components/SupervisionDiffModal';
 import { TemplatePickerModal } from './components/TemplatePickerModal';
+import { TermsOnboardingModal } from './components/TermsOnboardingModal';
 import { TopBar } from './components/TopBar';
 import { EfektyNauczaniaForm } from './components/forms/EfektyNauczaniaForm';
 import { KartaInformacyjnaForm } from './components/forms/KartaInformacyjnaForm';
@@ -73,8 +75,11 @@ import {
 } from './utils/documentFactory';
 import { triggerWindowPrint } from './utils/printDocument';
 import {
+  acceptTermsAndConditions,
+  BackupReminderMeta,
   exportStateAsJson,
   flushPendingAppStateSave,
+  getBackupReminderMeta,
   getCurrentStorageBackend,
   getSaveStatus,
   LegacyMigrationStatus,
@@ -87,7 +92,10 @@ import {
   saveAppStateImmediate,
   SaveStatus,
   scheduleSaveAppState,
+  shouldShowBackupReminder,
+  snoozeBackupReminder,
   StorageBackend,
+  subscribeBackupReminderMeta,
   subscribeCrossTabChanges,
   subscribeSaveStatus,
   validateAndParseSupervisionPackageJson,
@@ -123,6 +131,12 @@ export default function App() {
   const stateRef = useRef(state);
   stateRef.current = state;
   const [isHydrating, setIsHydrating] = useState(true);
+  const [requiresTermsAcceptance, setRequiresTermsAcceptance] = useState(false);
+  const [isAcceptingTerms, setIsAcceptingTerms] = useState(false);
+  const [backupReminderMeta, setBackupReminderMeta] = useState<BackupReminderMeta>(() =>
+    getBackupReminderMeta()
+  );
+  const appShellRef = useRef<HTMLDivElement | null>(null);
   const [storageBackend, setStorageBackend] = useState<StorageBackend>('indexeddb');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => getSaveStatus());
   const [legacyStatus, setLegacyStatus] = useState<LegacyMigrationStatus>('none');
@@ -184,7 +198,14 @@ export default function App() {
   useEffect(() => {
     let active = true;
     void loadAppState().then(
-      ({ state: loaded, backend, legacyStatus: legacy, dbReadError: readErr }) => {
+      ({
+        state: loaded,
+        backend,
+        legacyStatus: legacy,
+        dbReadError: readErr,
+        requiresTermsAcceptance: needsTerms,
+        backupReminderMeta: loadedBackupMeta,
+      }) => {
         if (!active) return;
         hasHydratedRef.current = true;
         skipNextAutoSaveRef.current = true;
@@ -192,6 +213,8 @@ export default function App() {
         setStorageBackend(backend);
         setLegacyStatus(legacy);
         setDbReadError(readErr ?? null);
+        setRequiresTermsAcceptance(needsTerms);
+        setBackupReminderMeta(loadedBackupMeta);
         setIsHydrating(false);
       }
     );
@@ -200,17 +223,31 @@ export default function App() {
     };
   }, []);
 
-  // Subscribe to IndexedDB write status and cross-tab notifications
+  // Lock background workspace with inert attribute while onboarding terms modal is blocking
+  useEffect(() => {
+    const shell = appShellRef.current;
+    if (!shell) return;
+    const isBlocked = !isHydrating && requiresTermsAcceptance;
+    if ('inert' in shell) {
+      shell.inert = isBlocked;
+    }
+  }, [isHydrating, requiresTermsAcceptance]);
+
+  // Subscribe to IndexedDB write status, backup reminder metadata, and cross-tab notifications
   useEffect(() => {
     const unsubSave = subscribeSaveStatus((nextStatus) => {
       setSaveStatus(nextStatus);
       setStorageBackend(getCurrentStorageBackend());
+    });
+    const unsubBackup = subscribeBackupReminderMeta((nextMeta) => {
+      setBackupReminderMeta(nextMeta);
     });
     const unsubCrossTab = subscribeCrossTabChanges(() => {
       setHasExternalTabUpdate(true);
     });
     return () => {
       unsubSave();
+      unsubBackup();
       unsubCrossTab();
     };
   }, []);
@@ -676,6 +713,17 @@ export default function App() {
     };
   };
 
+  const handleAcceptTerms = async () => {
+    if (isAcceptingTerms) return;
+    setIsAcceptingTerms(true);
+    try {
+      await acceptTermsAndConditions(APP_VERSION);
+      setRequiresTermsAcceptance(false);
+    } finally {
+      setIsAcceptingTerms(false);
+    }
+  };
+
   const handleDownloadBackupJson = () => {
     const ok = exportStateAsJson(stateRef.current);
     if (!ok) {
@@ -805,6 +853,8 @@ export default function App() {
       setHasExternalTabUpdate(false);
       setLegacyStatus('none');
       setDbReadError(null);
+      setRequiresTermsAcceptance(true);
+      setBackupReminderMeta(getBackupReminderMeta());
     }
     setBackupImportError(null);
     setConfirmDialog(null);
@@ -1067,8 +1117,20 @@ export default function App() {
   const hasPrintableContent =
     activeTab === 'nadzor' ? supervisionReports.length > 0 : docsToPrint.length > 0;
 
+  const backupReminder = useMemo(
+    () => shouldShowBackupReminder(state, backupReminderMeta),
+    [state, backupReminderMeta]
+  );
+
+  const isOnboardingLocked = !isHydrating && requiresTermsAcceptance;
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      <div
+        ref={appShellRef}
+        aria-hidden={isOnboardingLocked || undefined}
+        className="min-h-screen flex flex-col"
+      >
       <TopBar
         activeTab={activeTab}
         onChangeTab={setActiveTab}
@@ -1226,6 +1288,24 @@ export default function App() {
         </div>
       )}
 
+      {!isHydrating &&
+        !requiresTermsAcceptance &&
+        backupReminder.show &&
+        backupReminder.reason &&
+        activeTab !== 'kopia_json' &&
+        saveStatus !== 'conflict' &&
+        storageBackend !== 'memory' && (
+          <BackupReminderBanner
+            reason={backupReminder.reason}
+            daysSinceLastBackup={backupReminder.daysSinceLastBackup}
+            onDownloadBackupNow={handleDownloadBackupJson}
+            onGoToBackupTab={() => setActiveTab('kopia_json')}
+            onSnooze={() => {
+              void snoozeBackupReminder();
+            }}
+          />
+        )}
+
       {/* Main Interactive Workspace (hidden when printing) */}
       <main className="flex-1 flex flex-col no-print">
         {isHydrating ? (
@@ -1312,6 +1392,7 @@ export default function App() {
         {activeTab === 'kopia_json' && (
           <BackupJsonView
             state={state}
+            lastBackupExportAt={backupReminderMeta.lastBackupExportAt}
             onImportState={(nextState) => {
               setBackupDownloadFirst(true);
               setConfirmDialog({ kind: 'import_backup', nextState });
@@ -1878,6 +1959,13 @@ export default function App() {
       </ConfirmModal>
 
       <OfflineIndicator />
+      </div>
+
+      <TermsOnboardingModal
+        isOpen={isOnboardingLocked}
+        isSubmitting={isAcceptingTerms}
+        onAccept={() => void handleAcceptTerms()}
+      />
     </div>
   );
 }

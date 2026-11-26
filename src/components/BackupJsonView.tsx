@@ -5,6 +5,7 @@ import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storag
 
 interface BackupJsonViewProps {
   state: AppState;
+  lastBackupExportAt?: string | null;
   onImportState: (nextState: AppState) => void;
   onRequestFullReset: () => void;
   onOpenShareModal: (mode: 'export' | 'import') => void;
@@ -14,6 +15,7 @@ interface BackupJsonViewProps {
 
 export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
   state,
+  lastBackupExportAt = null,
   onImportState,
   onRequestFullReset,
   onOpenShareModal,
@@ -110,6 +112,17 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
               <p>
                 Szablony własne fragmentów:{' '}
                 <strong className="font-mono-tabular text-slate-900">{state.customTemplates.length}</strong>
+              </p>
+              <p>
+                Ostatnia kopia zapasowa JSON:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {lastBackupExportAt
+                    ? new Date(lastBackupExportAt).toLocaleString('pl-PL', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })
+                    : 'Jeszcze nie pobrano'}
+                </strong>
               </p>
             </div>
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 leading-relaxed">

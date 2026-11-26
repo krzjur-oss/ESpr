@@ -37,10 +37,15 @@ import {
   createId,
   createInitialAppState,
 } from './documentFactory';
+import { APP_VERSION } from '../data/changelog';
 import { triggerJsonDownload } from './download';
 import { buildTeacherKey } from './supervision';
 
 export const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
+export const TERMS_ACCEPTANCE_LS_KEY = 'esprawozdania_terms_accepted_v1';
+export const BACKUP_REMINDER_LS_KEY = 'esprawozdania_backup_meta_v1';
+export const BACKUP_REMINDER_INTERVAL_DAYS = 14;
+export const BACKUP_REMINDER_SNOOZE_DAYS = 7;
 export const DB_NAME = 'esprawozdania_db';
 export const DB_VERSION = 3;
 
@@ -736,6 +741,18 @@ export function sanitizeSupervisionClassNotes(raw: unknown): Record<string, stri
   return result;
 }
 
+export interface TermsAcceptanceRecord {
+  accepted: boolean;
+  pending?: boolean;
+  acceptedAt: string | null;
+  version: string;
+}
+
+export interface BackupReminderMeta {
+  lastBackupExportAt: string | null;
+  snoozedUntil: string | null;
+}
+
 export type StorageBackend = 'indexeddb' | 'memory';
 export type SaveStatus = 'saved' | 'saving' | 'conflict' | 'error' | 'memory_only';
 export type LegacyMigrationStatus =
@@ -760,6 +777,8 @@ export interface LoadAppStateResult {
   legacyStatus: LegacyMigrationStatus;
   revision: number;
   dbReadError?: string;
+  requiresTermsAcceptance: boolean;
+  backupReminderMeta: BackupReminderMeta;
 }
 
 interface MetaRecord<T = unknown> {
@@ -777,9 +796,14 @@ let writeQueue: Promise<SaveResult> = Promise.resolve({ ok: true, revision: 0 })
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingStateToSave: AppState | null = null;
 let currentSaveStatus: SaveStatus = 'saved';
+let cachedBackupReminderMeta: BackupReminderMeta = {
+  lastBackupExportAt: null,
+  snoozedUntil: null,
+};
 
 const saveStatusListeners = new Set<(status: SaveStatus) => void>();
 const crossTabListeners = new Set<(detail: { revision?: number }) => void>();
+const backupMetaListeners = new Set<(meta: BackupReminderMeta) => void>();
 let sharedBroadcastChannel: BroadcastChannel | null = null;
 
 function setSaveStatus(next: SaveStatus): void {
@@ -1046,9 +1070,148 @@ function clearLegacyLocalStorage(): void {
   }
 }
 
+function sanitizeTermsAcceptanceRecord(raw: unknown): TermsAcceptanceRecord | null {
+  if (!isPlainObject(raw)) return null;
+  if (typeof raw.accepted !== 'boolean') return null;
+  return {
+    accepted: raw.accepted,
+    pending: typeof raw.pending === 'boolean' ? raw.pending : undefined,
+    acceptedAt:
+      typeof raw.acceptedAt === 'string' && raw.acceptedAt.trim()
+        ? sanitizeIsoDate(raw.acceptedAt, '') || null
+        : null,
+    version: asStr(raw.version, APP_VERSION, 64),
+  };
+}
+
+function sanitizeBackupReminderMetaRecord(raw: unknown): BackupReminderMeta {
+  if (!isPlainObject(raw)) {
+    return { lastBackupExportAt: null, snoozedUntil: null };
+  }
+  const lastBackup =
+    typeof raw.lastBackupExportAt === 'string' && raw.lastBackupExportAt.trim()
+      ? sanitizeIsoDate(raw.lastBackupExportAt, '') || null
+      : null;
+  const snoozed =
+    typeof raw.snoozedUntil === 'string' && raw.snoozedUntil.trim()
+      ? sanitizeIsoDate(raw.snoozedUntil, '') || null
+      : null;
+  return {
+    lastBackupExportAt: lastBackup,
+    snoozedUntil: snoozed,
+  };
+}
+
+function pickLatestIsoDate(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isFinite(ta)) return b;
+  if (!Number.isFinite(tb)) return a;
+  return tb > ta ? b : a;
+}
+
+function mergeBackupReminderMeta(a: BackupReminderMeta, b: BackupReminderMeta): BackupReminderMeta {
+  return {
+    lastBackupExportAt: pickLatestIsoDate(a.lastBackupExportAt, b.lastBackupExportAt),
+    snoozedUntil: pickLatestIsoDate(a.snoozedUntil, b.snoozedUntil),
+  };
+}
+
+function readLocalTermsAcceptance(): TermsAcceptanceRecord | null {
+  try {
+    const ls = getLocalStorageApi();
+    if (!ls) return null;
+    const raw = ls.getItem(TERMS_ACCEPTANCE_LS_KEY);
+    if (!raw) return null;
+    return sanitizeTermsAcceptanceRecord(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalTermsAcceptance(record: TermsAcceptanceRecord | null): void {
+  try {
+    const ls = getLocalStorageApi();
+    if (!ls) return;
+    if (!record) {
+      ls.removeItem(TERMS_ACCEPTANCE_LS_KEY);
+    } else {
+      ls.setItem(TERMS_ACCEPTANCE_LS_KEY, JSON.stringify(record));
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+function readLocalBackupReminderMeta(): BackupReminderMeta {
+  try {
+    const ls = getLocalStorageApi();
+    if (!ls) return { lastBackupExportAt: null, snoozedUntil: null };
+    const raw = ls.getItem(BACKUP_REMINDER_LS_KEY);
+    if (!raw) return { lastBackupExportAt: null, snoozedUntil: null };
+    return sanitizeBackupReminderMetaRecord(JSON.parse(raw));
+  } catch {
+    return { lastBackupExportAt: null, snoozedUntil: null };
+  }
+}
+
+function writeLocalBackupReminderMeta(meta: BackupReminderMeta | null): void {
+  try {
+    const ls = getLocalStorageApi();
+    if (!ls) return;
+    if (!meta) {
+      ls.removeItem(BACKUP_REMINDER_LS_KEY);
+    } else {
+      ls.setItem(BACKUP_REMINDER_LS_KEY, JSON.stringify(meta));
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+function setCachedBackupReminderMeta(next: BackupReminderMeta): void {
+  cachedBackupReminderMeta = next;
+  for (const listener of backupMetaListeners) {
+    listener(next);
+  }
+}
+
+export function getBackupReminderMeta(): BackupReminderMeta {
+  return cachedBackupReminderMeta;
+}
+
+export function subscribeBackupReminderMeta(
+  listener: (meta: BackupReminderMeta) => void
+): () => void {
+  backupMetaListeners.add(listener);
+  listener(cachedBackupReminderMeta);
+  return () => {
+    backupMetaListeners.delete(listener);
+  };
+}
+
+async function writeMetaRecordToDb(key: string, value: unknown): Promise<void> {
+  if (!getIndexedDbApi() || currentStorageBackend !== 'indexeddb') return;
+  try {
+    const db = await openDatabase();
+    const tx = db.transaction([STORE_META], 'readwrite');
+    tx.objectStore(STORE_META).put({ key, value });
+    await txDone(tx);
+  } catch {
+    // Best-effort meta persistence; localStorage fallback preserves value
+  }
+}
+
 async function writeStateToDb(
   state: AppState,
-  options?: { replaceAll?: boolean; forceOverwriteRevision?: boolean }
+  options?: {
+    replaceAll?: boolean;
+    forceOverwriteRevision?: boolean;
+    initialTermsRecord?: TermsAcceptanceRecord;
+    resetBackupMeta?: boolean;
+  }
 ): Promise<SaveResult> {
   if (!getIndexedDbApi()) {
     return { ok: false, reason: 'unavailable', error: 'IndexedDB niedostępne w przeglądarce.' };
@@ -1135,6 +1298,15 @@ async function writeStateToDb(
           value: state.supervisionPackages.map((p) => p.id),
         });
         metaStore.put({ key: 'supervisionClassNotes', value: state.supervisionClassNotes });
+        if (options?.initialTermsRecord) {
+          metaStore.put({ key: 'termsAcceptance', value: options.initialTermsRecord });
+        }
+        if (options?.resetBackupMeta) {
+          metaStore.put({
+            key: 'backupReminderMeta',
+            value: { lastBackupExportAt: null, snoozedUntil: null },
+          });
+        }
       } else {
         if (prev.version !== state.version) {
           metaStore.put({ key: 'version', value: state.version });
@@ -1276,6 +1448,8 @@ export async function readIndexedDbStateOnly(): Promise<{
   found: boolean;
   state?: AppState;
   revision: number;
+  termsAcceptance?: TermsAcceptanceRecord | null;
+  backupReminderMeta?: BackupReminderMeta;
 }> {
   const db = await openDatabase();
   const tx = db.transaction(
@@ -1300,6 +1474,8 @@ export async function readIndexedDbStateOnly(): Promise<{
   await txDone(tx);
 
   const metaMap = new Map<string, unknown>(metaRecords.map((m) => [m.key, m.value]));
+  const termsAcceptance = sanitizeTermsAcceptanceRecord(metaMap.get('termsAcceptance'));
+  const backupReminderMeta = sanitizeBackupReminderMetaRecord(metaMap.get('backupReminderMeta'));
   const hasExistingDbData =
     metaMap.get('initialized') === true ||
     metaMap.has('profile') ||
@@ -1307,7 +1483,7 @@ export async function readIndexedDbStateOnly(): Promise<{
     rawPackages.length > 0;
 
   if (!hasExistingDbData) {
-    return { found: false, revision: 0 };
+    return { found: false, revision: 0, termsAcceptance, backupReminderMeta };
   }
 
   const rawProfile = metaMap.get('profile') as Partial<TeacherProfile> | undefined;
@@ -1351,13 +1527,31 @@ export async function readIndexedDbStateOnly(): Promise<{
     supervisionClassNotes: sanitizeSupervisionClassNotes(metaMap.get('supervisionClassNotes')),
   };
 
-  return { found: true, state: hydrated, revision };
+  return {
+    found: true,
+    state: hydrated,
+    revision,
+    termsAcceptance,
+    backupReminderMeta,
+  };
 }
 
 export async function loadAppState(): Promise<LoadAppStateResult> {
+  const lsTerms = readLocalTermsAcceptance();
+  const lsBackupMeta = readLocalBackupReminderMeta();
+
   try {
     const dbRead = await readIndexedDbStateOnly();
     const legacy = readLegacyLocalStorageDetailed();
+
+    const mergedBackupMeta = mergeBackupReminderMeta(
+      dbRead.backupReminderMeta ?? { lastBackupExportAt: null, snoozedUntil: null },
+      lsBackupMeta
+    );
+    setCachedBackupReminderMeta(mergedBackupMeta);
+
+    const isTermsAccepted =
+      dbRead.termsAcceptance?.accepted === true || lsTerms?.accepted === true;
 
     if (dbRead.found && dbRead.state) {
       currentKnownRevision = dbRead.revision;
@@ -1370,6 +1564,11 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
       if (legacy.status === 'valid') {
         clearLegacyLocalStorage();
       }
+
+      // Only require acceptance on an existing DB record if it was explicitly marked pending during initial empty boot
+      const requiresTermsAcceptance =
+        !isTermsAccepted && dbRead.termsAcceptance?.pending === true;
+
       return {
         state: dbRead.state,
         backend: 'indexeddb',
@@ -1378,6 +1577,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
             ? legacy.status
             : 'none',
         revision: dbRead.revision,
+        requiresTermsAcceptance,
+        backupReminderMeta: mergedBackupMeta,
       };
     }
 
@@ -1393,6 +1594,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
           backend: 'indexeddb',
           legacyStatus: 'migrated',
           revision: saveRes.revision,
+          requiresTermsAcceptance: false,
+          backupReminderMeta: mergedBackupMeta,
         };
       }
       currentStorageBackend = 'memory';
@@ -1402,6 +1605,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         backend: 'memory',
         legacyStatus: 'migration_write_failed',
         revision: 0,
+        requiresTermsAcceptance: false,
+        backupReminderMeta: mergedBackupMeta,
       };
     }
 
@@ -1416,13 +1621,21 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         backend: 'indexeddb',
         legacyStatus: legacy.status,
         revision: 0,
+        requiresTermsAcceptance: false,
+        backupReminderMeta: mergedBackupMeta,
       };
     }
 
     const initialState = createInitialAppState();
+    const requiresTermsAcceptance = !isTermsAccepted;
+    const pendingTermsRecord: TermsAcceptanceRecord | undefined = requiresTermsAcceptance
+      ? { accepted: false, pending: true, acceptedAt: null, version: APP_VERSION }
+      : undefined;
+
     const saveRes = await saveAppStateImmediate(initialState, {
       replaceAll: true,
       forceOverwriteRevision: true,
+      initialTermsRecord: pendingTermsRecord,
     });
     if (saveRes.ok) {
       return {
@@ -1430,6 +1643,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         backend: 'indexeddb',
         legacyStatus: 'none',
         revision: saveRes.revision,
+        requiresTermsAcceptance,
+        backupReminderMeta: mergedBackupMeta,
       };
     }
 
@@ -1440,11 +1655,19 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
       backend: 'memory',
       legacyStatus: 'none',
       revision: 0,
+      requiresTermsAcceptance,
+      backupReminderMeta: mergedBackupMeta,
     };
   } catch {
     currentStorageBackend = 'memory';
     setSaveStatus('memory_only');
     const legacy = readLegacyLocalStorageDetailed();
+    setCachedBackupReminderMeta(lsBackupMeta);
+    const requiresTermsAcceptance =
+      legacy.status !== 'valid' &&
+      legacy.status !== 'corrupted' &&
+      legacy.status !== 'read_error' &&
+      lsTerms?.accepted !== true;
     return {
       state: legacy.status === 'valid' ? legacy.state : createInitialAppState(),
       backend: 'memory',
@@ -1456,6 +1679,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
             : 'none',
       revision: 0,
       dbReadError: 'Nie udało się odczytać lokalnej bazy IndexedDB.',
+      requiresTermsAcceptance,
+      backupReminderMeta: lsBackupMeta,
     };
   }
 }
@@ -1486,7 +1711,12 @@ export async function reloadAppStateFromDb(): Promise<
 
 export function saveAppStateImmediate(
   state: AppState,
-  options?: { replaceAll?: boolean; forceOverwriteRevision?: boolean }
+  options?: {
+    replaceAll?: boolean;
+    forceOverwriteRevision?: boolean;
+    initialTermsRecord?: TermsAcceptanceRecord;
+    resetBackupMeta?: boolean;
+  }
 ): Promise<SaveResult> {
   if (debounceTimer !== null) {
     globalThis.clearTimeout(debounceTimer);
@@ -1588,12 +1818,141 @@ export async function retryIndexedDbPersistence(state: AppState): Promise<SaveRe
   return res;
 }
 
+export async function acceptTermsAndConditions(
+  version: string = APP_VERSION
+): Promise<TermsAcceptanceRecord> {
+  const record: TermsAcceptanceRecord = {
+    accepted: true,
+    pending: false,
+    acceptedAt: new Date().toISOString(),
+    version,
+  };
+  writeLocalTermsAcceptance(record);
+  await writeMetaRecordToDb('termsAcceptance', record);
+  return record;
+}
+
+export async function recordBackupExportNow(): Promise<BackupReminderMeta> {
+  const next: BackupReminderMeta = {
+    lastBackupExportAt: new Date().toISOString(),
+    snoozedUntil: null,
+  };
+  setCachedBackupReminderMeta(next);
+  writeLocalBackupReminderMeta(next);
+  await writeMetaRecordToDb('backupReminderMeta', next);
+  return next;
+}
+
+export async function snoozeBackupReminder(
+  days: number = BACKUP_REMINDER_SNOOZE_DAYS
+): Promise<BackupReminderMeta> {
+  const snoozeMs = Math.max(1, days) * 24 * 60 * 60 * 1000;
+  const next: BackupReminderMeta = {
+    lastBackupExportAt: cachedBackupReminderMeta.lastBackupExportAt,
+    snoozedUntil: new Date(Date.now() + snoozeMs).toISOString(),
+  };
+  setCachedBackupReminderMeta(next);
+  writeLocalBackupReminderMeta(next);
+  await writeMetaRecordToDb('backupReminderMeta', next);
+  return next;
+}
+
+export function hasUserWorkWorthBackingUp(state: AppState): boolean {
+  if (
+    state.documents.length > 1 ||
+    state.customWnioski.length > 0 ||
+    state.customTemplates.length > 0 ||
+    state.supervisionPackages.length > 0 ||
+    Object.keys(state.supervisionClassNotes).length > 0
+  ) {
+    return true;
+  }
+
+  if (
+    state.profile.fullName.trim().length > 0 ||
+    state.profile.schoolName.trim().length > 0 ||
+    state.profile.homeroomClass.trim().length > 0 ||
+    state.profile.classesList.length > 0 ||
+    state.profile.subjectAssignments.some(
+      (a) =>
+        a.programNumber.trim().length > 0 ||
+        a.textbookNumber.trim().length > 0 ||
+        a.textbookTitle.trim().length > 0
+    )
+  ) {
+    return true;
+  }
+
+  return state.documents.some((doc) => {
+    if (doc.updatedAt !== doc.createdAt) return true;
+    if (doc.type === 'efekty_nauczania') {
+      return Boolean(
+        doc.teacherName.trim() ||
+          doc.curriculumScope.trim() ||
+          doc.curriculumNotes.trim() ||
+          doc.futureConclusions.trim() ||
+          doc.educationalTrips.trim() ||
+          doc.preventiveProgram.trim()
+      );
+    }
+    return true;
+  });
+}
+
+export function shouldShowBackupReminder(
+  state: AppState,
+  meta: BackupReminderMeta,
+  nowMs: number = Date.now()
+): {
+  show: boolean;
+  reason: 'never_backed_up' | 'stale_backup' | null;
+  daysSinceLastBackup: number | null;
+} {
+  if (!hasUserWorkWorthBackingUp(state)) {
+    return { show: false, reason: null, daysSinceLastBackup: null };
+  }
+
+  if (meta.snoozedUntil) {
+    const snoozeTs = Date.parse(meta.snoozedUntil);
+    if (Number.isFinite(snoozeTs) && snoozeTs > nowMs) {
+      return { show: false, reason: null, daysSinceLastBackup: null };
+    }
+  }
+
+  if (!meta.lastBackupExportAt) {
+    return { show: true, reason: 'never_backed_up', daysSinceLastBackup: null };
+  }
+
+  const lastExportTs = Date.parse(meta.lastBackupExportAt);
+  if (!Number.isFinite(lastExportTs)) {
+    return { show: true, reason: 'never_backed_up', daysSinceLastBackup: null };
+  }
+
+  const elapsedMs = Math.max(0, nowMs - lastExportTs);
+  const daysSince = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+  if (daysSince >= BACKUP_REMINDER_INTERVAL_DAYS) {
+    return { show: true, reason: 'stale_backup', daysSinceLastBackup: daysSince };
+  }
+
+  return { show: false, reason: null, daysSinceLastBackup: daysSince };
+}
+
 export async function resetAllStoredState(freshState: AppState): Promise<SaveResult> {
   clearLegacyLocalStorage();
+  writeLocalTermsAcceptance(null);
+  writeLocalBackupReminderMeta(null);
+  setCachedBackupReminderMeta({ lastBackupExportAt: null, snoozedUntil: null });
   lastPersistedState = null;
   return saveAppStateImmediate(freshState, {
     replaceAll: true,
     forceOverwriteRevision: true,
+    initialTermsRecord: {
+      accepted: false,
+      pending: true,
+      acceptedAt: null,
+      version: APP_VERSION,
+    },
+    resetBackupMeta: true,
   });
 }
 
@@ -1615,6 +1974,9 @@ export async function exportRawIndexedDbBackup(): Promise<boolean> {
 
 export async function wipeDatabaseForRecovery(): Promise<void> {
   clearLegacyLocalStorage();
+  writeLocalTermsAcceptance(null);
+  writeLocalBackupReminderMeta(null);
+  setCachedBackupReminderMeta({ lastBackupExportAt: null, snoozedUntil: null });
   lastPersistedState = null;
   currentKnownRevision = 0;
   dbPromise = null;
@@ -1639,6 +2001,7 @@ export function resetStorageRuntimeForTests(): void {
   currentKnownRevision = 0;
   currentStorageBackend = 'indexeddb';
   currentSaveStatus = 'saved';
+  cachedBackupReminderMeta = { lastBackupExportAt: null, snoozedUntil: null };
   writeQueue = Promise.resolve({ ok: true, revision: 0 });
   dbPromise = null;
   if (sharedBroadcastChannel) {
@@ -1651,6 +2014,7 @@ export function resetStorageRuntimeForTests(): void {
   }
   saveStatusListeners.clear();
   crossTabListeners.clear();
+  backupMetaListeners.clear();
 }
 
 export function exportStateAsJson(state: AppState): boolean {
@@ -1660,7 +2024,11 @@ export function exportStateAsJson(state: AppState): boolean {
     ...state,
   };
   const dateTag = new Date().toISOString().slice(0, 10);
-  return triggerJsonDownload(payload, `sprawozdania-kopia-${dateTag}.json`);
+  const ok = triggerJsonDownload(payload, `sprawozdania-kopia-${dateTag}.json`);
+  if (ok) {
+    void recordBackupExportNow();
+  }
+  return ok;
 }
 
 export function validateAndParseImportedJson(jsonText: string):
