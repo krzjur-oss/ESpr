@@ -12,6 +12,7 @@ import {
   duplicateDocument,
   findSubjectAssignment,
   getDefaultSchoolYearInfo,
+  getSemesterPeriodTexts,
 } from '../documentFactory';
 import { triggerJsonDownload } from '../download';
 import { validateAndParseSupervisionPackageJson } from '../storage';
@@ -55,6 +56,15 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
     const feb02 = getDefaultSchoolYearInfo(new Date(2027, 1, 2)); // luty
     expect(feb02.schoolYear).toBe('2026/2027');
     expect(feb02.defaultSemester).toBe('II');
+
+    const derived = getSemesterPeriodTexts(' 2027 / 2028 ');
+    expect(derived.schoolYear).toBe('2027/2028');
+    expect(derived.sem1).toBe('01.09.2027 – 31.01.2028');
+    expect(derived.sem2).toBe('01.02.2028 – 30.06.2028');
+
+    const fallback = getSemesterPeriodTexts('', new Date(2026, 8, 1));
+    expect(fallback.schoolYear).toBe('2026/2027');
+    expect(fallback.sem2).toBe('01.02.2027 – 30.06.2027');
   });
 
   it('tworzy wszystkie typy dokumentów, dopasowuje program i podręcznik do klasy oraz duplikuje niezależnie', () => {
@@ -135,6 +145,24 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
       expect(nextDoc.previousConclusionsStatus).toBe('Więcej ćwiczeń rachunkowych.');
       expect(nextDoc.futureConclusions).toBe('');
     }
+
+    const karta = createDocumentByType('karta_informacyjna', profile);
+    const rolledKarta = cloneDocumentsForNewSchoolYear(
+      [karta],
+      {
+        targetYear: '2027/2028',
+        targetSemester: 'II',
+        mode: 'clean_base',
+        carryOverConclusions: false,
+      },
+      profile
+    );
+    expect(rolledKarta).toHaveLength(1);
+    const nextKarta = rolledKarta[0];
+    if (nextKarta?.type === 'karta_informacyjna') {
+      expect(nextKarta.period).toBe('01.02.2028 – 30.06.2028');
+      expect(nextKarta.title).toBe('Karta informacyjna · 01.02.2028 – 30.06.2028');
+    }
   });
 
   it('tworzy paczkę nadzoru, wykrywa różnice wersji i agreguje zbiorcze sprawozdanie klasy', () => {
@@ -209,6 +237,35 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
     expect(report5A.totals.nklCount).toBe(1);
     expect(report5A.homeroomEntries).toHaveLength(1);
     expect(report5A.directorNotes).toBe('Uwagi dyrektora po radzie.');
+
+    // Fallback nazwy szkoły z paczki nauczyciela dla NKL/Karty z pustym polem schoolName
+    const pFallback = createDefaultProfile();
+    pFallback.senderId = 'teacher-fallback';
+    pFallback.fullName = 'Maria Nowak';
+    pFallback.schoolName = 'SP nr 7 w Poznaniu';
+    pFallback.schoolYear = '2026/2027';
+
+    const nklNoSchool = createDocumentByType('uzasadnienie_nieklasyfikowania', pFallback);
+    nklNoSchool.schoolName = '';
+    if (nklNoSchool.type === 'uzasadnienie_nieklasyfikowania') {
+      nklNoSchool.className = '6B';
+      nklNoSchool.studentName = 'Jan B.';
+      nklNoSchool.subject = 'Fizyka';
+    }
+    const pkgFallback = buildSupervisionPackagePayload(pFallback, [nklNoSchool], {
+      schoolYearFilter: '2026/2027',
+      semesterFilter: 'all',
+    });
+    const parsedFallback = validateAndParseSupervisionPackageJson(JSON.stringify(pkgFallback));
+    expect(parsedFallback.ok).toBe(true);
+    if (parsedFallback.ok) {
+      const fallbackReports = aggregateClassCollectiveReports([parsedFallback.pkg], {}, {
+        schoolYear: '2026/2027',
+        semester: 'all',
+      });
+      expect(fallbackReports).toHaveLength(1);
+      expect(fallbackReports[0]?.schoolName).toBe('SP nr 7 w Poznaniu');
+    }
   });
 
   it('opóźnia revokeObjectURL przy bezpiecznym pobieraniu JSON i sprząta element DOM', () => {

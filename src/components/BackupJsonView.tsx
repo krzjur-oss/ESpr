@@ -160,7 +160,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
             </div>
           </div>
 
-          <div className="mt-6 flex flex-col sm:flex-row gap-2.5">
+          <div className="mt-6 flex flex-wrap gap-2.5">
             <button
               type="button"
               onClick={() => {
@@ -178,9 +178,9 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                   });
                 }
               }}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="flex-1 min-w-[168px] inline-flex items-center justify-center gap-2 rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 transition-colors whitespace-nowrap cursor-pointer"
             >
-              <FileArchive className="w-4 h-4" />
+              <FileArchive className="w-4 h-4 shrink-0" />
               <span>Pobierz archiwum .ZIP</span>
             </button>
             <button
@@ -199,9 +199,9 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                   });
                 }
               }}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="flex-1 min-w-[168px] inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap cursor-pointer"
             >
-              <Download className="w-4 h-4 text-blue-900" />
+              <Download className="w-4 h-4 text-blue-900 shrink-0" />
               <span>Pobierz kopię JSON</span>
             </button>
           </div>
@@ -231,9 +231,9 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors text-center cursor-pointer"
             >
-              <Upload className="w-4 h-4 text-blue-900" />
+              <Upload className="w-4 h-4 text-blue-900 shrink-0" />
               <span>Wybierz plik JSON lub ZIP z dysku</span>
             </button>
           </div>

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { SemesterType, SubjectAssignment, TeacherProfile } from '../types/reports';
-import { createId } from '../utils/documentFactory';
+import { createId, getSemesterPeriodTexts } from '../utils/documentFactory';
 import { Field, SectionHeader, inputClass } from './forms/FormPrimitives';
 
 interface ProfileViewProps {
@@ -24,6 +24,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [newTextbookNumber, setNewTextbookNumber] = useState('');
   const [newTextbookTitle, setNewTextbookTitle] = useState('');
   const [syncConfirmed, setSyncConfirmed] = useState(false);
+  const syncTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, []);
+
+  const semesterPeriods = getSemesterPeriodTexts(profile.schoolYear);
 
   const update = (patch: Partial<TeacherProfile>) => {
     onChange({ ...profile, ...patch });
@@ -101,7 +112,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleSync = () => {
     onApplyToAllDocuments();
     setSyncConfirmed(true);
-    setTimeout(() => setSyncConfirmed(false), 2500);
+    if (syncTimerRef.current !== null) {
+      window.clearTimeout(syncTimerRef.current);
+    }
+    syncTimerRef.current = window.setTimeout(() => {
+      setSyncConfirmed(false);
+      syncTimerRef.current = null;
+    }, 2500);
   };
 
   return (
@@ -211,7 +228,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     onClick={() =>
                       update({
                         periodPreset: 'sem1',
-                        periodText: '01.09.2025 – 31.01.2026',
+                        periodText: semesterPeriods.sem1,
                         defaultSemester: 'I',
                       })
                     }
@@ -224,13 +241,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     onClick={() =>
                       update({
                         periodPreset: 'sem2',
-                        periodText: '01.02.2026 – 26.06.2026',
+                        periodText: semesterPeriods.sem2,
                         defaultSemester: 'II',
                       })
                     }
                     className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 cursor-pointer"
                   >
-                    II okres (01.02 – 26.06)
+                    II okres (01.02 – 30.06)
                   </button>
                 </div>
               </div>

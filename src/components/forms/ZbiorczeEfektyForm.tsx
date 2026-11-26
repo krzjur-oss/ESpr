@@ -231,7 +231,7 @@ export const ZbiorczeEfektyForm: React.FC<Props> = ({
               Dodaj wiersze ręcznie lub zaczytaj dane z wypełnionych kart przedmiotowych w tej sesji
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {subjectCardsCount > 0 && (
               <button
                 type="button"

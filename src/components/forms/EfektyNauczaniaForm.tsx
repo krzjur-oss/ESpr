@@ -259,7 +259,7 @@ export const EfektyNauczaniaForm: React.FC<Props> = ({
           </Field>
 
           {canApplyFromProfile && matchedAssignment && (
-            <div className="md:col-span-2 flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-950">
+            <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs text-blue-950">
               <span>
                 W Profilu zapisano program i podręcznik dla przedmiotu{' '}
                 <strong>

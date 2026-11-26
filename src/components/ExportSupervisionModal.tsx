@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, Download, FileCheck2, ShieldCheck, X } from 'lucide-react';
 import {
   DOCUMENT_TYPE_LABELS,
@@ -33,6 +33,15 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
   const [inlineTeacherName, setInlineTeacherName] = useState('');
   const [exportedDone, setExportedDone] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const exportTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (exportTimerRef.current !== null) {
+        window.clearTimeout(exportTimerRef.current);
+      }
+    };
+  }, []);
 
   const candidateDocuments = useMemo(() => {
     return documents.filter((doc) => {
@@ -56,6 +65,10 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (exportTimerRef.current !== null) {
+      window.clearTimeout(exportTimerRef.current);
+      exportTimerRef.current = null;
+    }
     const preferredYear =
       defaultYearFilter !== 'all'
         ? defaultYearFilter
@@ -103,8 +116,12 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
     }
     setExportError(null);
     setExportedDone(true);
-    setTimeout(() => {
+    if (exportTimerRef.current !== null) {
+      window.clearTimeout(exportTimerRef.current);
+    }
+    exportTimerRef.current = window.setTimeout(() => {
       setExportedDone(false);
+      exportTimerRef.current = null;
     }, 2600);
   };
 
@@ -304,7 +321,7 @@ export const ExportSupervisionModal: React.FC<ExportSupervisionModalProps> = ({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
           <button
             type="button"
             onClick={onClose}

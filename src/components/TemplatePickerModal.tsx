@@ -305,7 +305,7 @@ export const TemplatePickerModal: React.FC<TemplatePickerModalProps> = ({
           <span className="text-xs text-slate-600 tabular-nums">
             Zaznaczono: <strong className="text-slate-900">{selectedIds.length}</strong>
           </span>
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}

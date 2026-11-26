@@ -690,6 +690,7 @@ export function aggregateClassCollectiveReports(
         if (!classKey) continue;
         const acc = ensureClass(classKey);
         if (doc.schoolName.trim()) acc.schoolNames.add(doc.schoolName.trim());
+        else if (pkg.schoolName.trim()) acc.schoolNames.add(pkg.schoolName.trim());
         if (doc.schoolYear.trim()) acc.schoolYears.add(doc.schoolYear.trim());
         const rowTeacher = doc.teacherName.trim() || teacherDisplayName;
 
@@ -716,6 +717,7 @@ export function aggregateClassCollectiveReports(
         if (!classKey) continue;
         const acc = ensureClass(classKey);
         if (doc.schoolName.trim()) acc.schoolNames.add(doc.schoolName.trim());
+        else if (pkg.schoolName.trim()) acc.schoolNames.add(pkg.schoolName.trim());
         if (doc.schoolYear.trim()) acc.schoolYears.add(doc.schoolYear.trim());
         const rowTeacher = doc.teacherName.trim() || teacherDisplayName;
 
@@ -744,6 +746,7 @@ export function aggregateClassCollectiveReports(
         if (!classKey) continue;
         const acc = ensureClass(classKey);
         if (doc.schoolName.trim()) acc.schoolNames.add(doc.schoolName.trim());
+        else if (pkg.schoolName.trim()) acc.schoolNames.add(pkg.schoolName.trim());
         if (doc.schoolYear.trim()) acc.schoolYears.add(doc.schoolYear.trim());
         const rowTeacher = doc.teacherName.trim() || teacherDisplayName;
 

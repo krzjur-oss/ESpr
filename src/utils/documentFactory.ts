@@ -184,21 +184,44 @@ export interface DefaultSchoolYearInfo {
   periodText: string;
 }
 
-export function getDefaultSchoolYearInfo(date: Date = new Date()): DefaultSchoolYearInfo {
-  const year = date.getFullYear();
-  const month = date.getMonth(); // 0 = styczeń, 8 = wrzesień
+export interface SemesterPeriodTexts {
+  schoolYear: string;
+  sem1: string;
+  sem2: string;
+}
 
+export function getSemesterPeriodTexts(schoolYear?: string, fallbackDate: Date = new Date()): SemesterPeriodTexts {
+  const match = schoolYear?.trim().match(/^(\d{4})\s*\/\s*(\d{4})$/);
+  if (match && match[1] && match[2]) {
+    const startYear = match[1];
+    const endYear = match[2];
+    return {
+      schoolYear: `${startYear}/${endYear}`,
+      sem1: `01.09.${startYear} – 31.01.${endYear}`,
+      sem2: `01.02.${endYear} – 30.06.${endYear}`,
+    };
+  }
+  const year = fallbackDate.getFullYear();
+  const month = fallbackDate.getMonth();
   const startYear = month >= 8 ? year : year - 1;
   const endYear = startYear + 1;
-  const isFirstSemester = month >= 8 || month === 0; // wrzesień–styczeń
-
   return {
     schoolYear: `${startYear}/${endYear}`,
+    sem1: `01.09.${startYear} – 31.01.${endYear}`,
+    sem2: `01.02.${endYear} – 30.06.${endYear}`,
+  };
+}
+
+export function getDefaultSchoolYearInfo(date: Date = new Date()): DefaultSchoolYearInfo {
+  const month = date.getMonth(); // 0 = styczeń, 8 = wrzesień
+  const isFirstSemester = month >= 8 || month === 0; // wrzesień–styczeń
+  const periods = getSemesterPeriodTexts(undefined, date);
+
+  return {
+    schoolYear: periods.schoolYear,
     defaultSemester: isFirstSemester ? 'I' : 'II',
     periodPreset: isFirstSemester ? 'sem1' : 'sem2',
-    periodText: isFirstSemester
-      ? `01.09.${startYear} – 31.01.${endYear}`
-      : `01.02.${endYear} – 30.06.${endYear}`,
+    periodText: isFirstSemester ? periods.sem1 : periods.sem2,
   };
 }
 
@@ -621,6 +644,11 @@ export function cloneDocumentsForNewSchoolYear(
 
     if (clone.type === 'karta_informacyjna') {
       if (options.mode === 'clean_base') {
+        const periods = getSemesterPeriodTexts(clone.schoolYear);
+        const nextPeriod =
+          options.targetSemester === 'I' ? periods.sem1 : periods.sem2;
+        clone.period = nextPeriod;
+        clone.title = `Karta informacyjna · ${nextPeriod}`;
         clone.subjectHours = clone.subjectHours.map((s) => ({
           ...s,
           id: createId(),

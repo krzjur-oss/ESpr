@@ -6,7 +6,7 @@ import {
   SubjectHoursRow,
   TeacherProfile,
 } from '../../types/reports';
-import { createId } from '../../utils/documentFactory';
+import { createId, getSemesterPeriodTexts } from '../../utils/documentFactory';
 import {
   Field,
   FormTopBar,
@@ -22,11 +22,13 @@ import {
   getProfileSchoolOptions,
   getProfileSubjectOptions,
   getProfileTeacherOptions,
+  getProfileYearOptions,
 } from './ProfileComboInput';
 
 interface Props {
   doc: KartaInformacyjnaDoc;
   profile: TeacherProfile;
+  availableYears?: string[];
   onChange: (updated: KartaInformacyjnaDoc) => void;
   onRequestReset: () => void;
 }
@@ -34,16 +36,31 @@ interface Props {
 export const KartaInformacyjnaForm: React.FC<Props> = ({
   doc,
   profile,
+  availableYears = [],
   onChange,
   onRequestReset,
 }) => {
-  const periodOptions: ProfileComboOption[] = [
-    ...(profile.periodText.trim()
-      ? [{ value: profile.periodText.trim(), subtitle: 'Domyślny okres z Profilu' }]
-      : []),
-    { value: '01.09.2025 – 31.01.2026', subtitle: 'I semestr' },
-    { value: '01.02.2026 – 26.06.2026', subtitle: 'II semestr' },
-  ];
+  const semesterPeriods = getSemesterPeriodTexts(doc.schoolYear || profile.schoolYear);
+  const periodOptionsMap = new Map<string, ProfileComboOption>();
+  if (profile.periodText.trim()) {
+    periodOptionsMap.set(profile.periodText.trim(), {
+      value: profile.periodText.trim(),
+      subtitle: 'Domyślny okres z Profilu',
+    });
+  }
+  if (!periodOptionsMap.has(semesterPeriods.sem1)) {
+    periodOptionsMap.set(semesterPeriods.sem1, {
+      value: semesterPeriods.sem1,
+      subtitle: 'I semestr',
+    });
+  }
+  if (!periodOptionsMap.has(semesterPeriods.sem2)) {
+    periodOptionsMap.set(semesterPeriods.sem2, {
+      value: semesterPeriods.sem2,
+      subtitle: 'II semestr',
+    });
+  }
+  const periodOptions = Array.from(periodOptionsMap.values());
 
   const homeroomOptions = getProfileClassOptions(profile, [
     { value: 'brak', subtitle: 'Brak wychowawstwa' },
@@ -128,35 +145,45 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
               dropdownHeader="Szkoła zapisana w Profilu"
             />
           </Field>
+          <Field label="Rok szkolny">
+            <ProfileComboInput
+              value={doc.schoolYear}
+              onChange={(val) => update({ schoolYear: val })}
+              options={getProfileYearOptions(profile, availableYears)}
+              placeholder="2025/2026"
+              className={`${inputClass} font-mono-tabular`}
+              dropdownHeader="Rok szkolny z Profilu i archiwum"
+            />
+          </Field>
           <Field label="Okres rozliczeniowy">
             <div className="space-y-2">
               <ProfileComboInput
                 value={doc.period}
                 onChange={(val) => update({ period: val })}
                 options={periodOptions}
-                placeholder="np. 01.09.2025 – 31.01.2026"
+                placeholder={semesterPeriods.sem1}
                 className={`${inputClass} font-mono-tabular`}
                 dropdownHeader="Okres z Profilu i semestry"
               />
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => update({ period: '01.09.2025 – 31.01.2026' })}
+                  onClick={() => update({ period: semesterPeriods.sem1 })}
                   className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 cursor-pointer"
                 >
                   I semestr (01.09–31.01)
                 </button>
                 <button
                   type="button"
-                  onClick={() => update({ period: '01.02.2026 – 26.06.2026' })}
+                  onClick={() => update({ period: semesterPeriods.sem2 })}
                   className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 cursor-pointer"
                 >
-                  II semestr (01.02–26.06)
+                  II semestr (01.02–30.06)
                 </button>
               </div>
             </div>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Łączna liczba godzin w szkole">
               <input
                 type="text"
@@ -179,14 +206,14 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
         </div>
 
         <div className="mt-5">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <label className="text-xs font-medium text-slate-700">
               Liczba godzin z poszczególnych przedmiotów / zajęć
             </label>
             <button
               type="button"
               onClick={addSubjectHour}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Dodaj przedmiot</span>
@@ -209,7 +236,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
                   value={row.hours}
                   onChange={(e) => updateSubjectHour(row.id, { hours: e.target.value })}
                   placeholder="Liczba godz."
-                  className={`${inputClass} w-32 font-mono-tabular`}
+                  className={`${inputClass} w-24 sm:w-32 shrink-0 font-mono-tabular`}
                 />
                 {doc.subjectHours.length > 1 && (
                   <button
@@ -299,7 +326,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
 
       {/* 04. Zadania zlecone przez dyrektora */}
       <section>
-        <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2 mb-4">
           <h3 className="text-sm font-semibold text-slate-900">
             <span className="font-mono-tabular text-blue-900 mr-2">04.</span>
             Realizacja zadań dodatkowych zleconych przez dyrektora
@@ -307,7 +334,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => addTask('directorTasks')}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Dodaj zadanie</span>
@@ -371,7 +398,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
 
       {/* 05. Zadania podejmowane z inicjatywy nauczyciela */}
       <section>
-        <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2 mb-4">
           <h3 className="text-sm font-semibold text-slate-900">
             <span className="font-mono-tabular text-blue-900 mr-2">05.</span>
             Zadania podejmowane z własnej inicjatywy nauczyciela
@@ -379,7 +406,7 @@ export const KartaInformacyjnaForm: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => addTask('teacherInitiativeTasks')}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Dodaj inicjatywę</span>

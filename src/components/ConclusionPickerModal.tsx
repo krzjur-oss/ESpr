@@ -166,7 +166,7 @@ export const ConclusionPickerModal: React.FC<ConclusionPickerModalProps> = ({
       <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <div>
+          <div className="min-w-0 pr-3">
             <h2 id="conclusion-picker-title" className="text-base font-semibold text-slate-900">
               Baza podpowiedzi — Wnioski do dalszej pracy
             </h2>
@@ -174,7 +174,7 @@ export const ConclusionPickerModal: React.FC<ConclusionPickerModalProps> = ({
               Wybierz gotowe sformułowania lub dodaj własny wniosek na stałe do swojej bazy
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setShowAddForm((v) => !v)}
@@ -395,7 +395,7 @@ export const ConclusionPickerModal: React.FC<ConclusionPickerModalProps> = ({
           ) : (
             filteredCategories.map((cat) => (
               <section key={cat.id}>
-                <div className="flex items-baseline justify-between border-b border-slate-200 pb-1.5 mb-2.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 pb-1.5 mb-2.5">
                   <h3 className="text-sm font-semibold text-slate-900">
                     <HighlightedText
                       text={cat.label}
@@ -486,7 +486,7 @@ export const ConclusionPickerModal: React.FC<ConclusionPickerModalProps> = ({
           <span className="text-xs text-slate-600 tabular-nums">
             Zaznaczono: <strong className="text-slate-900">{selectedItems.length}</strong>
           </span>
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}

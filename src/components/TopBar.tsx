@@ -47,7 +47,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* Zone 2: Single-line navigation links */}
         <nav
           aria-label="Nawigacja główna"
-          className="hidden md:flex items-center gap-4 lg:gap-6 text-sm font-medium"
+          className="hidden lg:flex items-center gap-3.5 xl:gap-6 text-sm font-medium"
         >
           {NAV_ITEMS.map((item) => {
             const isActive = activeTab === item.id;
@@ -104,10 +104,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Mobile compact secondary nav row */}
+      {/* Mobile & tablet compact secondary nav row */}
       <nav
         aria-label="Nawigacja mobilna"
-        className="flex md:hidden items-center justify-between border-t border-slate-100 px-3 py-1.5 overflow-x-auto gap-2"
+        className="flex lg:hidden items-center justify-between border-t border-slate-100 px-3 py-1.5 overflow-x-auto gap-2"
       >
         {NAV_ITEMS.map((item) => {
           const isActive = activeTab === item.id;

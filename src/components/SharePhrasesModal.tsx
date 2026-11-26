@@ -126,7 +126,7 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     setExportDoneMessage(`Pobrano plik JSON zawierający: ${parts.join(' oraz ')}.`);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -134,9 +134,8 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     setParseError(null);
     setSelectedFileName(file.name);
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
+    try {
+      const text = await file.text();
       const parsed = validateAndParseSharedPhrasesJson(text);
       if (parsed.ok) {
         setParsedData({
@@ -150,15 +149,14 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
         setParsedData(null);
         setParseError(parsed.error);
       }
+    } catch {
+      setParsedData(null);
+      setParseError('Nie udało się odczytać wybranego pliku.');
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-    };
-    reader.onerror = () => {
-      setParsedData(null);
-      setParseError('Nie udało się odczytać wybranego pliku.');
-    };
-    reader.readAsText(file, 'utf-8');
+    }
   };
 
   const canApplyImport =
@@ -369,7 +367,9 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
                   ref={fileInputRef}
                   type="file"
                   accept="application/json,.json"
-                  onChange={handleFileChange}
+                  onChange={(e) => {
+                    void handleFileChange(e);
+                  }}
                   className="hidden"
                 />
                 <button
@@ -540,7 +540,7 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
           <button
             type="button"
             onClick={onClose}

@@ -470,10 +470,12 @@ export default function App() {
             };
           }
           if (base.type === 'karta_informacyjna') {
+            const nextPeriod = prev.profile.periodText || base.period;
             return {
               ...base,
               teacherName: prev.profile.fullName || base.teacherName,
-              period: prev.profile.periodText || base.period,
+              period: nextPeriod,
+              title: `Karta informacyjna · ${nextPeriod || 'okres rozliczeniowy'}`,
               homeroomClass: prev.profile.homeroomClass || base.homeroomClass,
             };
           }
@@ -798,6 +800,7 @@ export default function App() {
     if (!confirmDialog) return;
     if (confirmDialog.kind === 'delete_doc') {
       const targetId = confirmDialog.doc.id;
+      setSelectedPrintIds((prev) => prev.filter((id) => id !== targetId));
       setState((prev) => {
         const remaining = prev.documents.filter((d) => d.id !== targetId);
         const nextActive =
@@ -1832,6 +1835,7 @@ export default function App() {
                             <KartaInformacyjnaForm
                               doc={activeDoc}
                               profile={state.profile}
+                              availableYears={availableYears}
                               onChange={handleUpdateDocument}
                               onRequestReset={() =>
                                 setConfirmDialog({ kind: 'reset_doc', doc: activeDoc })

@@ -315,7 +315,7 @@ export const NewYearRolloverModal: React.FC<NewYearRolloverModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-3.5">
           <button
             type="button"
             onClick={onClose}

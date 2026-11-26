@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   Bookmark,
@@ -96,6 +96,20 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
   const [editTplTitle, setEditTplTitle] = useState('');
   const [editTplCategory, setEditTplCategory] = useState<TemplateSectionCategory>('ogolne');
   const [editTplContent, setEditTplContent] = useState('');
+
+  const copyTimerRef = useRef<number | null>(null);
+  const insertTimerRef = useRef<number | null>(null);
+  const addedTimerRef = useRef<number | null>(null);
+  const tplAddedTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+      if (addedTimerRef.current !== null) window.clearTimeout(addedTimerRef.current);
+      if (tplAddedTimerRef.current !== null) window.clearTimeout(tplAddedTimerRef.current);
+    };
+  }, []);
 
   const mergedCategories = useMemo(
     () => buildMergedWnioskiCategories(customWnioski),
@@ -234,7 +248,11 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
     try {
       await navigator.clipboard.writeText(text);
       setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 1800);
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedKey(null);
+        copyTimerRef.current = null;
+      }, 1800);
     } catch {
       // Clipboard API may be restricted in some environments
     }
@@ -243,7 +261,11 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
   const handleInsert = (text: string, key: string) => {
     onInsertToActive(`• ${text}`);
     setInsertedKey(key);
-    setTimeout(() => setInsertedKey(null), 1800);
+    if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+    insertTimerRef.current = window.setTimeout(() => {
+      setInsertedKey(null);
+      insertTimerRef.current = null;
+    }, 1800);
   };
 
   const handleCreateSubmit = (e: React.FormEvent) => {
@@ -253,7 +275,11 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
     onAddCustomWniosek(newCategoryId, cleaned);
     setNewText('');
     setAddedFeedback(true);
-    setTimeout(() => setAddedFeedback(false), 2000);
+    if (addedTimerRef.current !== null) window.clearTimeout(addedTimerRef.current);
+    addedTimerRef.current = window.setTimeout(() => {
+      setAddedFeedback(false);
+      addedTimerRef.current = null;
+    }, 2000);
   };
 
   const handleCreateTemplateSubmit = (e: React.FormEvent) => {
@@ -265,7 +291,11 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
     setNewTplTitle('');
     setNewTplContent('');
     setTplAddedFeedback(true);
-    setTimeout(() => setTplAddedFeedback(false), 2000);
+    if (tplAddedTimerRef.current !== null) window.clearTimeout(tplAddedTimerRef.current);
+    tplAddedTimerRef.current = window.setTimeout(() => {
+      setTplAddedFeedback(false);
+      tplAddedTimerRef.current = null;
+    }, 2000);
   };
 
   const startEditingTemplate = (tpl: CustomTemplateEntry) => {
@@ -298,7 +328,7 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
               Korzystaj z gotowego słownika wniosków oraz własnych zapisanych fragmentów treści, które wstawisz jednym kliknięciem do dowolnego sprawozdania.
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => onOpenShareModal('export')}
@@ -661,7 +691,7 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                               <p className="text-xs text-blue-900 font-medium">Własny wpis</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
                             {item.isCustom && item.id && (
                               <button
                                 type="button"
@@ -926,7 +956,7 @@ export const WnioskiDatabaseView: React.FC<WnioskiDatabaseViewProps> = ({
                             />
                           </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
                           <button
                             type="button"
                             onClick={() => startEditingTemplate(tpl)}
