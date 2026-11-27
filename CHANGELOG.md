@@ -4,6 +4,19 @@ Wszystkie istotne zmiany w programie **E-Sprawozdania — Kreator Sprawozdań Sz
 
 ---
 
+## [1.8.1] — 27.11.2026
+
+**Zabezpieczenie importu JSON/ZIP, doprecyzowanie RODO i licencji WLDE oraz testy w CI**
+
+Wprowadzono limity rozmiaru i strumieniową ochronę dekompresji ZIP przy imporcie, doprecyzowano dokumentację prawną, RODO i status pomocniczy dokumentów oraz włączono testy automatyczne do workflow wdrożeniowego.
+
+- Wprowadzono wspólny limit rozmiaru importowanych plików (`25 MiB`) sprawdzany na `file.size` przed odczytem z dysku (`arrayBuffer()` / `text()`) oraz przed wywołaniem `JSON.parse()` we wszystkich parserach kopii, paczek nadzoru oraz wniosków i szablonów (wraz z instrukcją odzyskania większych archiwów).
+- Zastąpiono synchroniczne rozpakowywanie archiwów `.zip` inspekcją katalogu centralnego i strumieniową dekompresją z limitami liczby wpisów (`2000`), rozmiaru pojedynczego pliku (`25 MiB`), łącznego rozmiaru (`60 MiB`), współczynnika kompresji (`200:1`) oraz odrzucaniem duplikatów nazw i niedozwolonych ścieżek.
+- Doprecyzowano Regulamin i Politykę Prywatności (RODO, brak automatycznego szyfrowania IndexedDB/eksportów, rola hostingu i ostrzeżenie o danych szczególnych kategorii), dodano komunikat o pomocniczym statusie roboczych dokumentów oraz skorygowano nazwę i postanowienia ograniczonej licencji WLDE (wyjątki ustawowe art. 75 ust. 2–3 i art. 76 pr. aut., licencje zewnętrzne, zrewidowane klauzule odpowiedzialności i zmian regulaminu).
+- Rozbudowano zestaw testów automatycznych Vitest do **47 scenariuszy** (w tym testy bezpieczeństwa importu JSON/ZIP, ochrony przed ZIP bombami i atomowości IndexedDB) oraz dodano krok `npm test` w `.github/workflows/deploy.yml` przed budowaniem wersji produkcyjnej.
+
+---
+
 ## [1.8.0] — 26.11.2026
 
 **Bezpośredni eksport PDF, archiwum ZIP, blokada kart oraz zgoda startowa**

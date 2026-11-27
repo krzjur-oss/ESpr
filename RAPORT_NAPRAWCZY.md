@@ -203,3 +203,38 @@ grep -c 'fonts\.googleapis\.com\|fonts\.gstatic\.com' dist/index.html dist/sw.js
    - Otwórz aplikację online (Service Worker `autoUpdate` pobierze nową wersję oraz lokalne pakiety czcionek do pamięci podręcznej offline) i odśwież stronę raz jeszcze, aby uaktywnić nową wersję.
    - Istniejące dane z IndexedDB (`esprawozdania_db` v3) zostaną wczytane automatycznie bez utraty dokumentów, profili, własnych wniosków, szablonów ani pakietów nadzoru; przy pierwszym zapisie magazyn `meta` otrzyma klucz `revision`.
    - Dla pewności sprawdź w stopce aplikacji numer wersji **v1.7.1**, a w zakładce **„Kreator”** status **„Zapisano w IndexedDB”**, po czym możesz przetestować odświeżenie strony z wyłączonym internetem.
+
+---
+
+# Aktualizacja naprawcza — wersja 1.8.1 (27.11.2026)
+
+Wersja aplikacji została podniesiona z `1.8.0` na `1.8.1` (`package.json`, `package-lock.json`, `src/data/changelog.ts`, `CHANGELOG.md`, `README.md`, `REGULAMIN.md`, `LICENSE.md`). Pełny raport z audytu wersji bazowej `1.8.0` i szczegółowej weryfikacji znajduje się w pliku [`RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md`](./RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md).
+
+## 1. Zakres faktycznie wprowadzonych poprawek (27.11.2026)
+
+1. **Limity importu przed odczytem i parsowaniem (`src/utils/importLimits.ts`, `src/utils/storage.ts`, `src/components/BackupJsonView.tsx`, `src/components/SharePhrasesModal.tsx`, `src/App.tsx`):**
+   - Wprowadzono wspólną stałą `MAX_IMPORT_FILE_MIB = 25` (`MAX_IMPORT_FILE_BYTES`, `MAX_IMPORT_JSON_CHARS`).
+   - Puste pliki oraz pliki przekraczające 25 MiB są odrzucane na podstawie `file.size` przed wywołaniem `file.arrayBuffer()` i `file.text()`, z komunikatem po polsku i wskazówką odzyskania większych kopii.
+   - `validateAndParseImportedJson`, `validateAndParseSupervisionPackageJson` oraz `validateAndParseSharedPhrasesJson` sprawdzają `jsonText.length > MAX_IMPORT_JSON_CHARS` przed wywołaniem `JSON.parse()`.
+
+2. **Bezpieczna, strumieniowa dekompresja ZIP (`src/utils/zipBackup.ts`):**
+   - Zastąpiono synchroniczne `unzipSync()` inspekcją katalogu centralnego (EOCD / Zip64, weryfikacja ścieżek, blokada symlinków i szyfrowanych wpisów, **odrzucanie duplikatów nazw wpisów**, sprawdzenie obecności `pelna-kopia-esprawozdania.json`) połączoną z asynchronicznym strumieniowaniem `fflate.Unzip` (`UnzipPassThrough` + `UnzipInflate`) w porcjach `4096 B` z cyklicznym oddawaniem sterowania pętli zdarzeń.
+   - Egzekwowano limity: `MAX_ZIP_ENTRIES = 2000`, `MAX_ZIP_ENTRY_BYTES = 25 MiB`, `MAX_ZIP_TOTAL_BYTES = 60 MiB` oraz `MAX_ZIP_COMPRESSION_RATIO = 200` (od `1 MiB` danych wyjściowych) z natychmiastowym przerwaniem przy przekroczeniu budżetu.
+
+3. **Testy bezpieczeństwa importu (Vitest) i CI (`.github/workflows/deploy.yml`, `src/utils/__tests__/zipBackup.test.ts`, `src/utils/__tests__/storage.idb.test.ts`):**
+   - Dodano testy dla 12 scenariuszy regresyjnych importu JSON/ZIP (w tym limity przed odczytem i `JSON.parse()`, bomby ZIP z poprawnym i sfałszowanym nagłówkiem CD, duplikaty nazw wpisów w ZIP, duplikaty ID i klucze prototypu, atomowość przy błędzie transakcji IndexedDB i ponowne potwierdzenie regulaminu dla starszych wersji).
+   - Włączono krok `npm test` w `.github/workflows/deploy.yml` po `npm run lint` i przed `npm run build`.
+
+4. **Dokumenty prawne, status pomocniczy i licencja WLDE (`REGULAMIN.md`, `LICENSE.md`, `README.md`, `src/components/legal/LegalDocumentsContent.tsx`, `src/components/AboutView.tsx`, `src/components/TermsOnboardingModal.tsx`, `src/components/BackupJsonView.tsx`, `src/App.tsx`):**
+   - Doprecyzowano model Local-First, brak automatycznego szyfrowania IndexedDB/eksportów, rolę hostingu statycznego, role RODO, minimalizację danych szczególnych kategorii oraz dodano komunikat o pomocniczym statusie roboczych dokumentów.
+   - Skorygowano nazwę i postanowienia licencji WLDE (neutralna nazwa, ustawowe wyjątki z art. 75 ust. 2–3 i art. 76 pr. aut., licencje komponentów zewnętrznych, zrewidowane klauzule AS IS i zmian regulaminu wraz z wymogiem akceptacji wersji `1.8.0`).
+
+## 2. Zweryfikowane wyniki uruchomień (27.11.2026)
+
+- `npm audit --omit=dev`: kod `0` (`found 0 vulnerabilities`).
+- `npm ci`: kod `0` (`added 404 packages, and audited 411 packages`; ostrzeżenie `EBADENGINE` dla `html2canvas-pro@2.6.5` na Node `v22.23.5`).
+- `npm run lint` (`tsc --noEmit`): kod `0` (0 błędów).
+- `npm test` (`vitest run`): kod `0` (**5 plików, 47/47 testów zaliczonych**).
+- `npm run build` (`vite build`): kod `0` (`dist/sw.js`, precache `69 entries`, `2909.67 KiB`).
+- Testy manualne w przeglądarce oraz konfiguracja nagłówków bezpieczeństwa na docelowym hostingu: **NIEWYKONANE — wymaga weryfikacji poza środowiskiem** (szczegóły w `RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md`).
+

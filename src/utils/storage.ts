@@ -39,10 +39,14 @@ import {
 } from './documentFactory';
 import { APP_VERSION } from '../data/changelog';
 import { triggerJsonDownload } from './download';
+import { MAX_IMPORT_FILE_MIB, MAX_IMPORT_JSON_CHARS } from './importLimits';
 import { buildTeacherKey } from './supervision';
+
+export { MAX_IMPORT_FILE_BYTES, MAX_IMPORT_FILE_MIB, MAX_IMPORT_JSON_CHARS } from './importLimits';
 
 export const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
 export const TERMS_ACCEPTANCE_LS_KEY = 'esprawozdania_terms_accepted_v1';
+export const MIN_REQUIRED_TERMS_VERSION = '1.8.0';
 export const BACKUP_REMINDER_LS_KEY = 'esprawozdania_backup_meta_v1';
 export const BACKUP_REMINDER_INTERVAL_DAYS = 14;
 export const BACKUP_REMINDER_SNOOZE_DAYS = 7;
@@ -1551,8 +1555,31 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
     );
     setCachedBackupReminderMeta(mergedBackupMeta);
 
+    const isVersionBelowRequired = (ver: string | null | undefined): boolean => {
+      if (!ver) return false;
+      const parseParts = (v: string) =>
+        v
+          .trim()
+          .split('.')
+          .map((part) => Number.parseInt(part, 10) || 0);
+      const a = parseParts(ver);
+      const b = parseParts(MIN_REQUIRED_TERMS_VERSION);
+      const len = Math.max(a.length, b.length);
+      for (let i = 0; i < len; i += 1) {
+        const av = a[i] ?? 0;
+        const bv = b[i] ?? 0;
+        if (av < bv) return true;
+        if (av > bv) return false;
+      }
+      return false;
+    };
+
+    const acceptedVersion = dbRead.termsAcceptance?.version ?? lsTerms?.version ?? null;
+    const isOutdatedAcceptedTerms = isVersionBelowRequired(acceptedVersion);
+
     const isTermsAccepted =
-      dbRead.termsAcceptance?.accepted === true || lsTerms?.accepted === true;
+      (dbRead.termsAcceptance?.accepted === true || lsTerms?.accepted === true) &&
+      !isOutdatedAcceptedTerms;
 
     if (dbRead.found && dbRead.state) {
       currentKnownRevision = dbRead.revision;
@@ -1566,9 +1593,10 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         clearLegacyLocalStorage();
       }
 
-      // Only require acceptance on an existing DB record if it was explicitly marked pending during initial empty boot
+      // Require acceptance on pending initial boot OR when an explicit prior acceptance version is outdated
       const requiresTermsAcceptance =
-        !isTermsAccepted && dbRead.termsAcceptance?.pending === true;
+        (!isTermsAccepted && dbRead.termsAcceptance?.pending === true) ||
+        isOutdatedAcceptedTerms;
 
       return {
         state: dbRead.state,
@@ -2035,6 +2063,15 @@ export function exportStateAsJson(state: AppState): boolean {
 export function validateAndParseImportedJson(jsonText: string):
   | { ok: true; state: AppState }
   | { ok: false; error: string } {
+  if (typeof jsonText !== 'string' || jsonText.trim().length === 0) {
+    return { ok: false, error: 'Wybrany plik JSON jest pusty.' };
+  }
+  if (jsonText.length > MAX_IMPORT_JSON_CHARS) {
+    return {
+      ok: false,
+      error: `Zawartość pliku JSON przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB) i nie została przetworzona.`,
+    };
+  }
   try {
     const data = JSON.parse(jsonText) as Record<string, unknown>;
     if (!isPlainObject(data)) {
@@ -2209,6 +2246,15 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       ok: false;
       error: string;
     } {
+  if (typeof jsonText !== 'string' || jsonText.trim().length === 0) {
+    return { ok: false, error: 'Wybrany plik paczki nadzoru jest pusty.' };
+  }
+  if (jsonText.length > MAX_IMPORT_JSON_CHARS) {
+    return {
+      ok: false,
+      error: `Plik paczki nadzoru przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB).`,
+    };
+  }
   try {
     const raw = JSON.parse(jsonText) as Record<string, unknown>;
     if (!isPlainObject(raw)) {
@@ -2379,6 +2425,15 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
       ok: false;
       error: string;
     } {
+  if (typeof jsonText !== 'string' || jsonText.trim().length === 0) {
+    return { ok: false, error: 'Wybrany plik wniosków i szablonów jest pusty.' };
+  }
+  if (jsonText.length > MAX_IMPORT_JSON_CHARS) {
+    return {
+      ok: false,
+      error: `Plik wniosków i szablonów przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB).`,
+    };
+  }
   try {
     const data = JSON.parse(jsonText) as Record<string, unknown>;
     if (!isPlainObject(data)) {

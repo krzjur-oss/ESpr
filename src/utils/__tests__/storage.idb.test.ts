@@ -7,6 +7,7 @@ import {
   DB_NAME,
   DB_VERSION,
   LEGACY_STORAGE_KEY,
+  MAX_IMPORT_JSON_CHARS,
   acceptTermsAndConditions,
   exportRawIndexedDbBackup,
   getCurrentRevision,
@@ -17,8 +18,8 @@ import {
   mergeImportedTemplates,
   mergeImportedWnioski,
   readIndexedDbStateOnly,
-  recordBackupExportNow,
   reloadAppStateFromDb,
+  recordBackupExportNow,
   resetAllStoredState,
   resetStorageRuntimeForTests,
   retryIndexedDbPersistence,
@@ -29,6 +30,7 @@ import {
   subscribeCrossTabChanges,
   validateAndParseImportedJson,
   validateAndParseSharedPhrasesJson,
+  validateAndParseSupervisionPackageJson,
 } from '../storage';
 
 class MemoryStorage implements Storage {
@@ -426,7 +428,7 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       expect(validateAndParseImportedJson('{uszkodzony json').ok).toBe(false);
     });
 
-    it('nie modyfikuje bazy IndexedDB przy błędnym pliku lub błędzie transakcji w trakcie importu', async () => {
+    it('nie modyfikuje bazy IndexedDB ani stanu aktywnej sesji przy pustym/błędnym pliku, duplikatach ID, kluczach prototypu lub błędzie transakcji', async () => {
       const { state: initial } = await loadAppState();
       const safeState: AppState = {
         ...initial,
@@ -434,13 +436,87 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       };
       await saveAppStateImmediate(safeState);
 
-      // 1. Błędny plik JSON -> odrzucony na etapie walidacji
-      const invalidImport = validateAndParseImportedJson(
+      let uiState: AppState = safeState;
+      const uiView: { feedback: { type: 'error'; message: string } | null } = { feedback: null };
+
+      const simulateBackupImportAttempt = async (rawText: string) => {
+        const parsed = validateAndParseImportedJson(rawText);
+        if (!parsed.ok) {
+          uiView.feedback = { type: 'error', message: parsed.error };
+          return;
+        }
+        const res = await saveAppStateImmediate(parsed.state, {
+          replaceAll: true,
+          forceOverwriteRevision: true,
+        });
+        if (!res.ok) {
+          uiView.feedback = {
+            type: 'error',
+            message: res.error || 'Nie udało się zapisać zaimportowanych danych w IndexedDB.',
+          };
+          return;
+        }
+        uiState = parsed.state;
+        uiView.feedback = null;
+      };
+
+      // 1. Pusty JSON -> odrzucony przed JSON.parse, bez zmiany UI i IDB
+      await simulateBackupImportAttempt('   ');
+      expect(uiView.feedback?.type).toBe('error');
+      expect(uiState.profile.fullName).toBe('Oryginalny Nauczyciel');
+
+      // 2. Błąd parsera -> komunikat dla użytkownika bez utraty bieżącej sesji
+      await simulateBackupImportAttempt('{uszkodzony json');
+      expect(uiView.feedback?.type).toBe('error');
+      expect(uiView.feedback?.message).toContain('Nie udało się odczytać pliku JSON');
+      expect(uiState.profile.fullName).toBe('Oryginalny Nauczyciel');
+
+      // 3. Błędna struktura JSON -> odrzucony na etapie walidacji
+      await simulateBackupImportAttempt(
         JSON.stringify({ app: 'InnyProgram', profile: {}, documents: [] })
       );
-      expect(invalidImport.ok).toBe(false);
+      expect(uiView.feedback?.type).toBe('error');
+      expect(uiState.profile.fullName).toBe('Oryginalny Nauczyciel');
 
-      // 2. Poprawny plik, ale błąd transakcji przy zapisie atomowym -> baza pozostaje nienaruszona
+      // 4. Duplikaty ID i klucze prototypu (__proto__, constructor, prototype)
+      const doc1 = createDocumentByType('efekty_nauczania', safeState.profile);
+      const doc2 = createDocumentByType('efekty_nauczania', safeState.profile);
+      doc2.id = doc1.id;
+      await simulateBackupImportAttempt(
+        JSON.stringify({
+          app: 'E-Sprawozdania',
+          version: 1,
+          profile: safeState.profile,
+          documents: [doc1, doc2],
+        })
+      );
+      expect(uiView.feedback?.type).toBe('error');
+      expect(uiState.profile.fullName).toBe('Oryginalny Nauczyciel');
+
+      const protoRawJson = `{"app":"E-Sprawozdania","version":1,"profile":${JSON.stringify(
+        safeState.profile
+      )},"documents":${JSON.stringify([doc1])},"supervisionClassNotes":{"__proto__":"evil","constructor":"evil","prototype":"evil","2026/2027::I::4A":"Bezpieczna notatka"}}`;
+      const protoParsed = validateAndParseImportedJson(protoRawJson);
+      expect(protoParsed.ok).toBe(true);
+      if (protoParsed.ok) {
+        expect(Object.keys(protoParsed.state.supervisionClassNotes)).toEqual([
+          '2026/2027::I::4A',
+        ]);
+        expect(
+          Object.prototype.hasOwnProperty.call(
+            protoParsed.state.supervisionClassNotes,
+            '__proto__'
+          )
+        ).toBe(false);
+        expect(
+          Object.prototype.hasOwnProperty.call(
+            protoParsed.state.supervisionClassNotes,
+            'constructor'
+          )
+        ).toBe(false);
+      }
+
+      // 5. Poprawny plik, ale błąd transakcji przy zapisie atomowym -> baza i aktywny stan UI pozostają nienaruszone
       const replacementState = createInitialAppState();
       replacementState.profile.fullName = 'Nowy z Importu';
 
@@ -455,14 +531,35 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
         throw new Error('AbortError: przerwano import');
       });
 
-      const importSave = await saveAppStateImmediate(replacementState, {
-        replaceAll: true,
-        forceOverwriteRevision: true,
-      });
-      expect(importSave.ok).toBe(false);
+      await simulateBackupImportAttempt(
+        JSON.stringify({ app: 'E-Sprawozdania', kind: 'full_backup', ...replacementState })
+      );
+      expect(uiView.feedback?.type).toBe('error');
+      expect(uiState.profile.fullName).toBe('Oryginalny Nauczyciel');
 
       const inDb = await readIndexedDbStateOnly();
       expect(inDb.state?.profile.fullName).toBe('Oryginalny Nauczyciel');
+    });
+
+    it('odrzuca zbyt duży tekst JSON we wszystkich trzech parserach przed wywołaniem JSON.parse()', () => {
+      const jsonParseSpy = vi.spyOn(JSON, 'parse');
+      const oversizedPayload = ' '.repeat(MAX_IMPORT_JSON_CHARS + 1);
+      // Zapewnij niepusty znak na początku, aby nie odpadł na trim()
+      const nonEmptyOversized = `{${oversizedPayload}`;
+
+      const fullRes = validateAndParseImportedJson(nonEmptyOversized);
+      expect(fullRes.ok).toBe(false);
+      if (!fullRes.ok) expect(fullRes.error).toContain('25 MiB');
+
+      const supRes = validateAndParseSupervisionPackageJson(nonEmptyOversized);
+      expect(supRes.ok).toBe(false);
+      if (!supRes.ok) expect(supRes.error).toContain('25 MiB');
+
+      const phrasesRes = validateAndParseSharedPhrasesJson(nonEmptyOversized);
+      expect(phrasesRes.ok).toBe(false);
+      if (!phrasesRes.ok) expect(phrasesRes.error).toContain('25 MiB');
+
+      expect(jsonParseSpy).not.toHaveBeenCalled();
     });
 
     it('parsuje i scala paczki wniosków i szablonów (merge vs replace)', () => {
@@ -693,6 +790,21 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       const boot = await loadAppState();
       expect(boot.state.profile.fullName).toBe('Anna Nowak');
       expect(boot.requiresTermsAcceptance).toBe(false);
+    });
+
+    it('wymaga ponownego potwierdzenia regulaminu przy starszej wersji zgody bez utraty zapisanych danych', async () => {
+      const { state } = await loadAppState();
+      await saveAppStateImmediate({
+        ...state,
+        profile: { ...state.profile, fullName: 'Marek Zieliński' },
+      });
+      await acceptTermsAndConditions('1.7.1');
+
+      resetStorageRuntimeForTests();
+      const boot = await loadAppState();
+      expect(boot.requiresTermsAcceptance).toBe(true);
+      expect(boot.state.profile.fullName).toBe('Marek Zieliński');
+      expect(boot.state.documents.length).toBe(state.documents.length);
     });
 
     it('ponownie wymaga akceptacji regulaminu po pełnym resecie aplikacji', async () => {

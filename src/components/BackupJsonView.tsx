@@ -11,8 +11,12 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppState } from '../types/reports';
+import { MAX_IMPORT_FILE_MIB } from '../utils/importLimits';
 import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storage';
-import { exportStateAsZip, extractBackupJsonFromZip } from '../utils/zipBackup';
+import {
+  exportStateAsZip,
+  readValidatedBackupFileForImport,
+} from '../utils/zipBackup';
 
 interface BackupJsonViewProps {
   state: AppState;
@@ -50,21 +54,14 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
     };
 
     try {
-      let jsonText = '';
-      if (file.name.toLowerCase().endsWith('.zip')) {
-        const buffer = await file.arrayBuffer();
-        const extracted = extractBackupJsonFromZip(buffer);
-        if (!extracted.ok) {
-          setFeedback({ type: 'error', message: extracted.error });
-          resetInput();
-          return;
-        }
-        jsonText = extracted.jsonText;
-      } else {
-        jsonText = await file.text();
+      const readResult = await readValidatedBackupFileForImport(file);
+      if (!readResult.ok) {
+        setFeedback({ type: 'error', message: readResult.error });
+        resetInput();
+        return;
       }
 
-      const parsed = validateAndParseImportedJson(jsonText);
+      const parsed = validateAndParseImportedJson(readResult.jsonText);
       if (parsed.ok) {
         setFeedback(null);
         onImportState(parsed.state);
@@ -91,7 +88,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
           Kopia zapasowa i przenoszenie danych (JSON)
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          Aplikacja działa w trybie Local-First — wszystkie dane przechowywane są wyłącznie w lokalnej bazie IndexedDB Twojej przeglądarki (bez obciążania localStorage). Eksportuj plik JSON, aby zachować archiwum lub przenieść dane na inny komputer.
+          Aplikacja działa w modelu Local-First — treści formularzy, dokumentów, profilu i baz użytkownika są zapisywane lokalnie w bazie IndexedDB przeglądarki (aplikacja nie wysyła treści dokumentów na serwer). Eksportuj plik JSON lub archiwum .zip, aby zachować kopię lub przenieść dane na inne urządzenie.
         </p>
       </div>
 
@@ -156,7 +153,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
               </p>
             </div>
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 leading-relaxed">
-              <strong>Uwaga RODO:</strong> Plik kopii JSON oraz archiwum ZIP mogą zawierać imiona i nazwiska uczniów oraz inne dane osobowe. Pliki nie są szyfrowane — przekazuj je wyłącznie bezpiecznym kanałem i usuń po użyciu.
+              <strong>Uwaga RODO i bezpieczeństwo:</strong> Lokalna baza IndexedDB oraz eksportowane pliki JSON, archiwa ZIP i paczki nadzoru nie są szyfrowane przez aplikację i mogą zawierać dane osobowe uczniów (w tym dane o stanie zdrowia lub niepełnosprawności) oraz nauczycieli. Chroń urządzenie hasłem i blokadą ekranu, nie przesyłaj kopii niezabezpieczonym kanałem i usuń pliki po użyciu. Wyczyszczenie danych witryny nie usuwa kopii zapisanych na dysku.
             </div>
           </div>
 
@@ -214,7 +211,10 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
               Import danych z pliku JSON lub archiwum ZIP
             </h2>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-              Wczytaj wcześniej zapisaną kopię zapasową (<code className="font-mono-tabular">.json</code> lub wyeksportowane archiwum <code className="font-mono-tabular">.zip</code>). Obecna sesja zostanie zastąpiona danymi z pliku.
+              Wczytaj wcześniej zapisaną kopię zapasową (<code className="font-mono-tabular">.json</code> lub wyeksportowane archiwum <code className="font-mono-tabular">.zip</code>). Przed nadpisaniem bieżącej sesji zostanie wyświetlone potwierdzenie z możliwością wcześniejszego pobrania aktualnej kopii.
+            </p>
+            <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+              Dopuszczalny rozmiar pliku importu: <strong className="font-mono-tabular text-slate-700">{MAX_IMPORT_FILE_MIB} MiB</strong>. Jeśli kopia jest większa, rozpakuj archiwum <code className="font-mono-tabular">.zip</code> lokalnie lub podziel dokumenty na mniejsze roczniki przed przeniesieniem.
             </p>
           </div>
 

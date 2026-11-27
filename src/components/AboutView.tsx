@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import { APP_RELEASE_DATE, APP_VERSION, CHANGELOG_ENTRIES } from '../data/changelog';
 import {
+  AuxiliaryToolNoticeCallout,
   BackupRecommendationCallout,
+  LICENSE_FULL_TITLE,
   RegulaminContent,
   WldeLicenseContent,
 } from './legal/LegalDocumentsContent';
@@ -142,6 +144,9 @@ export const AboutView: React.FC<AboutViewProps> = ({
             </div>
           </section>
 
+          {/* Auxiliary status notice */}
+          <AuxiliaryToolNoticeCallout />
+
           {/* Core Capabilities */}
           <section className="rounded-xl border border-slate-200 bg-white p-6">
             <h2 className="text-base font-semibold text-slate-900 mb-4">
@@ -154,7 +159,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
                   <span>6 typów szkolnych dokumentów</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Karty efektów nauczania, zbiorcze sprawozdania koordynatorów, karty informacyjne nauczyciela, podsumowania dla 6 ról specjalistów oraz oficjalne załączniki klasyfikacyjne: uzasadnienie nieklasyfikowania (I półrocze / roczne) i uzasadnienie oceny niedostatecznej.
+                  Karty efektów nauczania, zbiorcze sprawozdania koordynatorów, karty informacyjne nauczyciela, podsumowania dla 6 ról specjalistów oraz robocze załączniki klasyfikacyjne: uzasadnienie nieklasyfikowania (I półrocze / roczne) i uzasadnienie oceny niedostatecznej.
                 </p>
               </div>
 
@@ -184,7 +189,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
                   <span>100% offline · Local-First (IndexedDB)</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Wszystkie dane pozostają wyłącznie w lokalnej bazie IndexedDB w Twojej przeglądarce i nigdy nie opuszczają urządzenia. Możesz zainstalować program jako aplikację PWA oraz tworzyć kopie zapasowe w formacie JSON lub spakowanego archiwum .zip.
+                  Treść dokumentów, profilu i baz użytkownika zapisywana jest lokalnie w bazie IndexedDB przeglądarki (aplikacja nie wysyła treści dokumentów na serwer). Możesz zainstalować program jako aplikację PWA oraz tworzyć niezaszyfrowane kopie zapasowe w formacie JSON lub .zip.
                 </p>
               </div>
             </div>
@@ -197,13 +202,13 @@ export const AboutView: React.FC<AboutViewProps> = ({
             </h2>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div className="border-b border-slate-100 pb-2.5">
-                <dt className="text-xs font-medium text-slate-500">Twórca i właściciel praw autorskich</dt>
+                <dt className="text-xs font-medium text-slate-500">Twórca aplikacji</dt>
                 <dd className="mt-0.5 font-semibold text-slate-900">mgr Krzysztof Jureczek</dd>
               </div>
               <div className="border-b border-slate-100 pb-2.5">
                 <dt className="text-xs font-medium text-slate-500">Licencja</dt>
                 <dd className="mt-0.5 font-medium text-slate-900">
-                  Wolna Licencja Domowo-Edukacyjna (WLDE)
+                  {LICENSE_FULL_TITLE}
                 </dd>
               </div>
               <div className="border-b border-slate-100 pb-2.5">
@@ -214,7 +219,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
               </div>
               <div className="border-b border-slate-100 pb-2.5">
                 <dt className="text-xs font-medium text-slate-500">Przechowywanie danych</dt>
-                <dd className="mt-0.5 text-slate-900">IndexedDB (lokalnie, bez serwera) + kopia JSON / archiwum .zip</dd>
+                <dd className="mt-0.5 text-slate-900">IndexedDB (lokalnie w przeglądarce, bez szyfrowania aplikacji) + kopia JSON / .zip</dd>
               </div>
               <div className="pt-1">
                 <dt className="text-xs font-medium text-slate-500">Kontakt e-mail</dt>

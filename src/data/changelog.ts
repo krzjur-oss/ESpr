@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.8.1';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.8.1',
+    date: '27.11.2026',
+    title: 'Zabezpieczenie importu JSON/ZIP, doprecyzowanie RODO i licencji WLDE oraz testy w CI',
+    summary:
+      'Wprowadzono limity rozmiaru i strumieniową ochronę dekompresji ZIP przy imporcie, doprecyzowano dokumentację prawną, RODO i status pomocniczy dokumentów oraz włączono testy automatyczne do workflow wdrożeniowego.',
+    changes: [
+      'Wprowadzono wspólny limit rozmiaru importowanych plików (25 MiB) sprawdzany na file.size przed odczytem z dysku oraz przed wywołaniem JSON.parse() we wszystkich parserach kopii, paczek nadzoru oraz wniosków i szablonów (wraz z instrukcją odzyskania większych archiwów).',
+      'Zastąpiono synchroniczne rozpakowywanie archiwów .zip inspekcją katalogu centralnego i strumieniową dekompresją z limitami liczby wpisów (2000), rozmiaru pojedynczego pliku (25 MiB), łącznego rozmiaru (60 MiB), współczynnika kompresji (200:1) oraz odrzucaniem duplikatów nazw i niedozwolonych ścieżek.',
+      'Doprecyzowano Regulamin i Politykę Prywatności (RODO, brak automatycznego szyfrowania IndexedDB/eksportów, rola hostingu i ostrzeżenie o danych szczególnych kategorii), dodano komunikat o pomocniczym statusie roboczych dokumentów oraz skorygowano nazwę i postanowienia ograniczonej licencji WLDE (wyjątki ustawowe art. 75 ust. 2–3 i art. 76 pr. aut., licencje zewnętrzne, zrewidowane klauzule odpowiedzialności i zmian regulaminu).',
+      'Rozbudowano zestaw testów automatycznych Vitest do 47 scenariuszy (w tym testy bezpieczeństwa importu JSON/ZIP, ochrony przed ZIP bombami i atomowości IndexedDB) oraz dodano krok npm test w workflow GitHub Actions przed budowaniem wersji produkcyjnej.',
+    ],
+  },
   {
     version: '1.8.0',
     date: '26.11.2026',

@@ -3,6 +3,7 @@ import { CheckCircle2, Scale, ShieldCheck } from 'lucide-react';
 import { APP_VERSION } from '../data/changelog';
 import {
   BackupRecommendationCallout,
+  LICENSE_FULL_TITLE,
   RegulaminContent,
   WldeLicenseContent,
 } from './legal/LegalDocumentsContent';
@@ -159,7 +160,7 @@ export const TermsOnboardingModal: React.FC<TermsOnboardingModalProps> = ({
               <span className="text-slate-500">
                 {activeDoc === 'regulamin'
                   ? 'Dokument 1 z 2: Regulamin i Prywatność (RODO)'
-                  : 'Dokument 2 z 2: Wolna Licencja Domowo-Edukacyjna (WLDE)'}
+                  : `Dokument 2 z 2: ${LICENSE_FULL_TITLE}`}
               </span>
               <button
                 type="button"
@@ -187,7 +188,7 @@ export const TermsOnboardingModal: React.FC<TermsOnboardingModalProps> = ({
                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900 shrink-0 cursor-pointer"
               />
               <span>
-                Zapoznałem(-am) się z <strong>Regulaminem, Polityką Prywatności (RODO)</strong> oraz warunkami <strong>Wolnej Licencji Domowo-Edukacyjnej (WLDE)</strong> i akceptuję je w całości.
+                Zapoznałem(-am) się z <strong>Regulaminem, Polityką Prywatności (RODO)</strong> oraz warunkami dokumentu <strong>{LICENSE_FULL_TITLE}</strong> i akceptuję je.
               </span>
             </label>
 
@@ -199,7 +200,7 @@ export const TermsOnboardingModal: React.FC<TermsOnboardingModalProps> = ({
                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900 shrink-0 cursor-pointer"
               />
               <span>
-                Przyjmuję do wiadomości, że dane są zapisywane wyłącznie lokalnie w przeglądarce oraz że w celu ochrony przed utratą dokumentów <strong>zaleca się regularne wykonywanie kopii zapasowej JSON</strong>.
+                Przyjmuję do wiadomości, że aplikacja jest narzędziem pomocniczym, dane zapisywane są lokalnie w przeglądarce bez szyfrowania przez aplikację oraz że <strong>zaleca się regularne wykonywanie kopii zapasowej (JSON / ZIP)</strong> i ochronę urządzenia.
               </span>
             </label>
           </div>

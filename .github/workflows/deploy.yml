@@ -35,6 +35,9 @@ jobs:
       - name: Sprawdź typy TypeScript
         run: npm run lint
 
+      - name: Uruchom testy automatyczne
+        run: npm test
+
       - name: Zbuduj aplikację produkcyjną (PWA)
         run: npm run build
 

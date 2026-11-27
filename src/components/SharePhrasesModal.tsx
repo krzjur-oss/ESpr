@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { CustomTemplateEntry, CustomWniosekEntry } from '../types/reports';
+import { validateImportFileMetadata } from '../utils/importLimits';
 import {
   PhrasesExportScope,
   exportPhrasesAsJson,
@@ -135,6 +136,12 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     setSelectedFileName(file.name);
 
     try {
+      const precheck = validateImportFileMetadata(file, { allowZip: false });
+      if (!precheck.ok) {
+        setParsedData(null);
+        setParseError(precheck.error);
+        return;
+      }
       const text = await file.text();
       const parsed = validateAndParseSharedPhrasesJson(text);
       if (parsed.ok) {

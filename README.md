@@ -1,17 +1,19 @@
 # E-Sprawozdania — Kreator Sprawozdań Szkolnych (Local-First PWA)
 
-**Aktualna wersja:** `1.8.0` (listopad 2026) · [Historia zmian (`CHANGELOG.md`)](./CHANGELOG.md)
+**Aktualna wersja:** `1.8.1` (listopad 2026) · [Historia zmian (`CHANGELOG.md`)](./CHANGELOG.md)
 
-Aplikacja webowa działająca w 100% offline w przeglądarce (Local-First PWA) dla nauczycieli, wychowawców, specjalistów i dyrektorów szkół do tworzenia, archiwizowania, podglądu A4, bezpośredniego eksportu PDF oraz drukowania sprawozdań semestralnych i rocznych.
+Aplikacja webowa w modelu Local-First PWA (działająca offline w przeglądarce po wczytaniu zasobów przez Service Worker) dla nauczycieli, wychowawców, specjalistów i dyrektorów szkół do tworzenia, archiwizowania, podglądu A4, bezpośredniego eksportu PDF oraz drukowania sprawozdań semestralnych i rocznych.
 
-## Najważniejsze funkcje (v1.8.0)
+> **Status prawny dokumentów:** E‑Sprawozdania jest narzędziem pomocniczym do przygotowywania roboczych kart, zestawień i sprawozdań. Nie zastępuje dzienników, arkuszy ocen ani innej dokumentacji, której prowadzenie, treść, forma, podpisy i przechowywanie wynikają z przepisów prawa lub procedur placówki. Przed wykorzystaniem dokumentu należy zweryfikować jego zgodność z wymaganiami dyrektora i szkoły.
 
-- **6 typów dokumentów szkolnych:** Karta efektów nauczania, Zbiorcze sprawozdanie koordynatora, Karta informacyjna nauczyciela, Podsumowanie efektów pracy specjalisty (6 ról), Uzasadnienie nieklasyfikowania (NKL) oraz Uzasadnienie oceny niedostatecznej (NDST).
+## Najważniejsze funkcje (v1.8.1)
+
+- **6 typów roboczych dokumentów szkolnych:** Karta efektów nauczania, Zbiorcze sprawozdanie koordynatora, Karta informacyjna nauczyciela, Podsumowanie efektów pracy specjalisty (6 ról), Uzasadnienie nieklasyfikowania (NKL) oraz Uzasadnienie oceny niedostatecznej (NDST).
 - **Bezpośredni eksport PDF z paskiem postępu:** Generowanie i pobieranie pojedynczych kart, zaznaczonych kompletów oraz raportów zbiorczych klas jako pliki `.pdf` (`jsPDF` + `html2canvas-pro`) z zachowaniem systemowego drukowania A4.
-- **Kopia zapasowa JSON oraz archiwum `.zip`:** Eksport i przywracanie pełnej kopii sesji w pliku `.json` lub jednym spakowanym archiwum `.zip` (zawierającym profil, wszystkie dokumenty w osobnych plikach oraz bazy wniosków, szablonów i paczek nadzoru).
+- **Kopia zapasowa JSON oraz archiwum `.zip` (limit importu 25 MiB):** Eksport i bezpieczne przywracanie pełnej kopii sesji w pliku `.json` lub spakowanym archiwum `.zip` ze strumieniową ochroną przed nadmierną dekompresją.
 - **Archiwum lat szkolnych i blokada kart:** Filtrowanie i sortowanie dokumentów, przenoszenie kart na nowy rok szkolny, wskaźnik ostatniej modyfikacji oraz blokada zatwierdzonych lub archiwalnych dokumentów (`Zablokuj (archiwum)`).
 - **Nadzór dyrektora:** Eksport podpisanych paczek sprawozdań, porównywanie zmian wersji oraz automatyczne sprawozdania zbiorcze dla każdej klasy.
-- **100% Offline & Local-First:** Lokalne przechowywanie danych w `IndexedDB` z kontrolą rewizji, lokalne fonty offline oraz wbudowany system zgody startowej (Regulamin RODO, Licencja WLDE, nota o kopiach zapasowych).
+- **Architektura Local-First i przejrzystość RODO:** Treści formularzy i dokumentów zapisywane są lokalnie w `IndexedDB` z kontrolą rewizji (bez wysyłania treści dokumentów na serwer i bez automatycznego szyfrowania plików kopii), z lokalnymi fontami oraz obowiązkową zgodą startową (Regulamin RODO, Licencja WLDE, nota o kopiach zapasowych).
 
 ## Publikacja na GitHub Pages
 
@@ -43,7 +45,7 @@ npm run build
 
 ## Licencja, regulamin i historia zmian
 
-Program jest udostępniany **bezpłatnie dla nauczycieli, specjalistów szkolnych, placówek oświatowych oraz do użytku domowego** na warunkach **Wolnej Licencji Domowo-Edukacyjnej (WLDE)**.
+Program jest udostępniany **bezpłatnie dla nauczycieli, specjalistów szkolnych, placówek oświatowych oraz do użytku domowego** na warunkach dokumentu **Ograniczona licencja bezpłatnego użytku edukacyjnego i prywatnego (WLDE)** (historycznie WLDE — nie jest to licencja wolnego oprogramowania ani open source; komponenty zewnętrzne podlegają własnym licencjom).
 
 - Historia zmian (Changelog): [`CHANGELOG.md`](./CHANGELOG.md)
 - Szczegóły licencji: [`LICENSE.md`](./LICENSE.md)

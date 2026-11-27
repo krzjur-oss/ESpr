@@ -53,6 +53,7 @@ import {
   TemplatesProvider,
 } from './context/TemplatesContext';
 import { APP_VERSION } from './data/changelog';
+import { validateImportFileMetadata } from './utils/importLimits';
 import { suggestCategoryIdForDocument } from './data/wnioskiDatabase';
 import {
   AppState,
@@ -930,6 +931,13 @@ export default function App() {
     const readResults = await Promise.all(
       fileArray.map(async (file) => {
         try {
+          const precheck = validateImportFileMetadata(file, { allowZip: false });
+          if (!precheck.ok) {
+            return {
+              fileName: file.name,
+              parsed: { ok: false as const, error: precheck.error },
+            };
+          }
           const text = await file.text();
           return { fileName: file.name, parsed: validateAndParseSupervisionPackageJson(text) };
         } catch {
@@ -2013,7 +2021,7 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white px-4 md:px-6 py-2.5 text-xs text-slate-500 no-print">
         <div className="mx-auto flex max-w-[1440px] flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-center sm:text-left">
-            © 2026 <strong className="font-medium text-slate-700">mgr Krzysztof Jureczek</strong> · E-Sprawozdania <span className="font-mono-tabular">v{APP_VERSION}</span> · Bezpłatnie dla nauczycieli i edukacji (WLDE)
+            © 2026 <strong className="font-medium text-slate-700">mgr Krzysztof Jureczek</strong> · E-Sprawozdania <span className="font-mono-tabular">v{APP_VERSION}</span> · Narzędzie pomocnicze · Licencja ograniczona (WLDE)
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4">
             <button
