@@ -10,6 +10,7 @@ import { APP_VERSION } from '../data/changelog';
 import { AppState, DOCUMENT_TYPE_LABELS } from '../types/reports';
 import { triggerBlobDownload } from './download';
 import {
+  BackupSizeEvaluation,
   MAX_IMPORT_FILE_BYTES,
   MAX_IMPORT_FILE_MIB,
   MAX_ZIP_COMPRESSION_RATIO,
@@ -17,9 +18,14 @@ import {
   MAX_ZIP_ENTRY_BYTES,
   MAX_ZIP_TOTAL_BYTES,
   ZIP_RATIO_CHECK_MIN_BYTES,
+  evaluateBackupExportSize,
   validateImportFileMetadata,
 } from './importLimits';
-import { recordBackupExportNow } from './storage';
+import {
+  BackupScopeOptions,
+  createScopedBackupState,
+  recordBackupExportNow,
+} from './storage';
 
 const POLISH_CHAR_MAP: Record<string, string> = {
   ą: 'a',
@@ -58,8 +64,8 @@ function toJsonBytes(data: unknown): Uint8Array {
 
 export const FULL_BACKUP_ZIP_ENTRY = 'pelna-kopia-esprawozdania.json';
 
-const STREAM_CHUNK_BYTES = 4096;
-const YIELD_EVERY_CHUNKS = 16;
+const STREAM_CHUNK_BYTES = 65536;
+const YIELD_EVERY_CHUNKS = 4;
 
 function readU16(data: Uint8Array, offset: number): number {
   return (data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8);
@@ -398,7 +404,8 @@ function inspectZipCentralDirectory(
   if (fallback.compression !== 0 && fallback.compression !== 8) {
     return {
       ok: false,
-      error: 'Plik kopii wewnątrz archiwum ZIP używa nieobsługiwanej metody kompresji.',
+      error:
+        'Plik kopii wewnątrz archiwum ZIP używa nieobsługiwanej metody kompresji. Użyj archiwum pobranego z aplikacji lub wskaż rozpakowany plik .json.',
     };
   }
 
@@ -406,9 +413,56 @@ function inspectZipCentralDirectory(
 }
 
 function yieldToMainThread(): Promise<void> {
+  if (typeof MessageChannel === 'function') {
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        channel.port2.close();
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    });
+  }
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, 0);
   });
+}
+
+export interface BackupZipExportSummary {
+  ok: boolean;
+  filename: string;
+  byteLength: number;
+  evaluation: BackupSizeEvaluation;
+}
+
+function buildZipBackupFilenameSlug(schoolYear?: string): string {
+  const trimmed = schoolYear?.trim();
+  if (!trimmed || trimmed === 'all') return '';
+  return `-${trimmed.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
+}
+
+export function buildBackupZipWithStats(
+  state: AppState,
+  options?: BackupScopeOptions
+): {
+  bytes: Uint8Array;
+  scopedState: AppState;
+  evaluation: BackupSizeEvaluation;
+  filename: string;
+} {
+  const scopedState = createScopedBackupState(state, options);
+  const bytes = buildBackupZipBytes(scopedState);
+  const evaluation = evaluateBackupExportSize(bytes.byteLength);
+  const dateTag = new Date().toISOString().slice(0, 10);
+  const yearSlug = buildZipBackupFilenameSlug(options?.schoolYear);
+  const filename = `sprawozdania-archiwum${yearSlug}-${dateTag}.zip`;
+  return {
+    bytes,
+    scopedState,
+    evaluation,
+    filename,
+  };
 }
 
 export function buildBackupZipBytes(state: AppState): Uint8Array {
@@ -474,20 +528,36 @@ export function buildBackupZipBytes(state: AppState): Uint8Array {
   return zipSync(entries, { level: 6 });
 }
 
-export function exportStateAsZip(state: AppState): boolean {
+export function exportStateAsZipWithSummary(
+  state: AppState,
+  options?: BackupScopeOptions
+): BackupZipExportSummary {
   try {
-    const zipBytes = buildBackupZipBytes(state);
-    const arrayBuffer = zipBytes.slice().buffer;
+    const { bytes, evaluation, filename } = buildBackupZipWithStats(state, options);
+    const arrayBuffer = bytes.slice().buffer;
     const blob = new Blob([arrayBuffer], { type: 'application/zip' });
-    const dateTag = new Date().toISOString().slice(0, 10);
-    const ok = triggerBlobDownload(blob, `sprawozdania-archiwum-${dateTag}.zip`);
+    const ok = triggerBlobDownload(blob, filename);
     if (ok) {
       void recordBackupExportNow();
     }
-    return ok;
+    return {
+      ok,
+      filename,
+      byteLength: bytes.byteLength,
+      evaluation,
+    };
   } catch {
-    return false;
+    return {
+      ok: false,
+      filename: '',
+      byteLength: 0,
+      evaluation: evaluateBackupExportSize(0),
+    };
   }
+}
+
+export function exportStateAsZip(state: AppState, options?: BackupScopeOptions): boolean {
+  return exportStateAsZipWithSummary(state, options).ok;
 }
 
 export async function extractBackupJsonFromZip(
@@ -524,7 +594,6 @@ export async function extractBackupJsonFromZip(
   let targetStreamStarted = false;
   let targetCompleted = false;
   let actualEntryBytes = 0;
-  let totalStreamedBytes = 0;
   const collectedChunks: Uint8Array[] = [];
 
   const abortWith = (message: string) => {
@@ -583,18 +652,10 @@ export async function extractBackupJsonFromZip(
 
       if (chunk && chunk.byteLength > 0) {
         actualEntryBytes += chunk.byteLength;
-        totalStreamedBytes += chunk.byteLength;
 
         if (actualEntryBytes > MAX_ZIP_ENTRY_BYTES) {
           abortWith(
             `Rozpakowywany plik kopii przekroczył limit ${MAX_IMPORT_FILE_MIB} MiB. Dekompresja została natychmiast przerwana.`
-          );
-          return;
-        }
-
-        if (totalStreamedBytes > MAX_ZIP_TOTAL_BYTES) {
-          abortWith(
-            'Rozpakowywane dane przekroczyły łączny limit bezpieczeństwa. Dekompresja została przerwana.'
           );
           return;
         }
@@ -620,7 +681,9 @@ export async function extractBackupJsonFromZip(
     try {
       file.start();
     } catch {
-      abortWith('Archiwum ZIP używa nieobsługiwanej metody kompresji lub ma uszkodzony nagłówek.');
+      abortWith(
+        'Archiwum ZIP używa nieobsługiwanej metody kompresji lub ma uszkodzony nagłówek. Użyj archiwum pobranego z aplikacji lub wskaż rozpakowany plik .json.'
+      );
     }
   };
 

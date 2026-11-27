@@ -19,15 +19,25 @@ export interface ExportElementsToPdfOptions {
   onProgress?: (progress: PdfExportProgress) => void;
 }
 
+const MAX_CANVAS_DIMENSION_PX = 16_384;
+const MAX_CANVAS_AREA_PX = 16_000_000;
+
+export interface SkippedPdfSheet {
+  index: number;
+  title: string;
+}
+
 export type PdfExportResult =
   | {
       ok: true;
       filename: string;
       pageCount: number;
+      skipped?: SkippedPdfSheet[];
     }
   | {
       ok: false;
       error: string;
+      skipped?: SkippedPdfSheet[];
     };
 
 /**
@@ -238,6 +248,29 @@ export async function exportElementsToPdf(
     });
 
     let pageCount = 0;
+    const skipped: SkippedPdfSheet[] = [];
+
+    const extractSheetTitle = (clone: HTMLElement, sheetIndex: number): string => {
+      if (typeof clone.querySelector === 'function') {
+        const heading = clone.querySelector('h1, h2');
+        const headingText = heading?.textContent?.trim();
+        if (headingText) return headingText;
+      }
+      return `Karta #${sheetIndex + 1}`;
+    };
+
+    const computeSafeCanvasScale = (renderWidth: number, renderHeight: number): number => {
+      const safeW = Math.max(1, renderWidth);
+      const safeH = Math.max(1, renderHeight);
+      const maxScaleByW = MAX_CANVAS_DIMENSION_PX / safeW;
+      const maxScaleByH = MAX_CANVAS_DIMENSION_PX / safeH;
+      const maxScaleByArea = Math.sqrt(MAX_CANVAS_AREA_PX / (safeW * safeH));
+      const bounded = Math.min(2, maxScaleByW, maxScaleByH, maxScaleByArea);
+      if (!Number.isFinite(bounded) || bounded <= 1) {
+        return 1;
+      }
+      return Math.max(1, Math.floor(bounded * 100) / 100);
+    };
 
     for (let sheetIndex = 0; sheetIndex < clones.length; sheetIndex += 1) {
       const clone = clones[sheetIndex];
@@ -249,8 +282,11 @@ export async function exportElementsToPdf(
       await yieldForUiPaint();
 
       const renderWidth = clone.scrollWidth || clone.offsetWidth || 794;
+      const renderHeight = clone.scrollHeight || clone.offsetHeight || 1123;
+      const scale = computeSafeCanvasScale(renderWidth, renderHeight);
+
       const canvas = await html2canvas(clone, {
-        scale: 2,
+        scale,
         backgroundColor: '#ffffff',
         useCORS: true,
         logging: false,
@@ -261,6 +297,12 @@ export async function exportElementsToPdf(
       emitProgress('rendering', docNumber, pageCount, capturedPercent);
 
       if (canvas.width === 0 || canvas.height === 0) {
+        skipped.push({
+          index: docNumber,
+          title: extractSheetTitle(clone, sheetIndex),
+        });
+        const doneSkippedPercent = 10 + ((sheetIndex + 1) / totalDocuments) * 82;
+        emitProgress('rendering', docNumber, pageCount, doneSkippedPercent);
         continue;
       }
 
@@ -349,7 +391,11 @@ export async function exportElementsToPdf(
     if (pageCount === 0) {
       return {
         ok: false,
-        error: 'Nie udało się wyrenderować stron dokumentu do pliku PDF.',
+        error:
+          skipped.length > 0
+            ? 'Nie udało się wyrenderować żadnej karty do pliku PDF (wszystkie arkusze miały pusty obszar roboczy).'
+            : 'Nie udało się wyrenderować stron dokumentu do pliku PDF.',
+        ...(skipped.length > 0 ? { skipped } : {}),
       };
     }
 
@@ -371,6 +417,7 @@ export async function exportElementsToPdf(
       ok: true,
       filename: safeFilename,
       pageCount,
+      ...(skipped.length > 0 ? { skipped } : {}),
     };
   } catch (err) {
     const message =

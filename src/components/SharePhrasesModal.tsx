@@ -68,6 +68,7 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
     customWnioski: CustomWniosekEntry[];
     customTemplates: CustomTemplateEntry[];
     sourceKind: 'phrases_bundle' | 'full_backup';
+    warnings?: string[];
   } | null>(null);
   const [importWnioski, setImportWnioski] = useState(true);
   const [importTemplates, setImportTemplates] = useState(true);
@@ -149,6 +150,7 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
           customWnioski: parsed.customWnioski,
           customTemplates: parsed.customTemplates,
           sourceKind: parsed.sourceKind,
+          warnings: parsed.warnings,
         });
         setImportWnioski(parsed.customWnioski.length > 0);
         setImportTemplates(parsed.customTemplates.length > 0);
@@ -409,6 +411,17 @@ export const SharePhrasesModal: React.FC<SharePhrasesModalProps> = ({
                         : 'Wykryto pakiet udostępnionych wniosków i szablonów.'}
                     </p>
                   </div>
+
+                  {parsedData.warnings && parsedData.warnings.length > 0 && (
+                    <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        {parsedData.warnings.map((warn, idx) => (
+                          <p key={idx}>{warn}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-700">

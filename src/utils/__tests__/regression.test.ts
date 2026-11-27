@@ -23,6 +23,8 @@ import {
   buildSupervisionPackagePayload,
   diffSupervisionPackage,
   exportSupervisionPackageAsJson,
+  findNameOnlySupervisionMatchIndex,
+  mergeSupervisionBatch,
 } from '../supervision';
 
 const ALL_DOC_TYPES: DocumentType[] = [
@@ -383,5 +385,65 @@ describe('Group E: Regresja funkcjonalna, pobieranie i wydruki A4', () => {
         expect(collectiveHtml).not.toContain('<script>alert(1)</script>');
       }
     }
+  });
+
+  it('wykrywa kolizję po samym imieniu i nazwisku przy imporcie partii paczek nadzoru oraz respektuje wybór użytkownika', () => {
+    const pExisting = createDefaultProfile();
+    pExisting.senderId = 'sender-old';
+    pExisting.fullName = 'Anna Nowak';
+    pExisting.schoolName = 'SP nr 1';
+    const dExisting = createDocumentByType('efekty_nauczania', pExisting);
+    const rawExisting = buildSupervisionPackagePayload(pExisting, [dExisting], {
+      schoolYearFilter: '2026/2027',
+      semesterFilter: 'all',
+    });
+    const parsedExisting = validateAndParseSupervisionPackageJson(JSON.stringify(rawExisting));
+    expect(parsedExisting.ok).toBe(true);
+    if (!parsedExisting.ok) return;
+
+    const pIncomingSameName = createDefaultProfile();
+    pIncomingSameName.senderId = 'sender-new-device';
+    pIncomingSameName.fullName = 'Anna Nowak';
+    pIncomingSameName.schoolName = 'SP nr 1';
+    const dIncoming = createDocumentByType('efekty_nauczania', pIncomingSameName);
+    if (dIncoming.type === 'efekty_nauczania') {
+      dIncoming.excellentGradesCount = '9';
+    }
+    const rawIncoming = buildSupervisionPackagePayload(pIncomingSameName, [dIncoming], {
+      schoolYearFilter: '2026/2027',
+      semesterFilter: 'all',
+    });
+    const parsedIncoming = validateAndParseSupervisionPackageJson(JSON.stringify(rawIncoming));
+    expect(parsedIncoming.ok).toBe(true);
+    if (!parsedIncoming.ok) return;
+
+    const matchIdx = findNameOnlySupervisionMatchIndex(
+      [parsedExisting.pkg],
+      parsedIncoming.pkg
+    );
+    expect(matchIdx).toBe(0);
+
+    // Wybór 'new_teacher' dodaje jako osobną paczkę z wspólnym batchImportedAt
+    const batchTs = '2026-11-27T15:00:00.000Z';
+    const resAsNew = mergeSupervisionBatch(
+      [parsedExisting.pkg],
+      [{ fileName: 'anna.json', ok: true, pkg: parsedIncoming.pkg }],
+      { [parsedIncoming.pkg.id]: 'new_teacher' },
+      batchTs
+    );
+    expect(resAsNew.added).toBe(1);
+    expect(resAsNew.diffs).toHaveLength(0);
+    expect(resAsNew.working).toHaveLength(2);
+    expect(resAsNew.working[1]?.importedAt).toBe(batchTs);
+
+    // Wybór 'same_teacher' wykrywa różnice względem istniejącej paczki
+    const resAsSame = mergeSupervisionBatch(
+      [parsedExisting.pkg],
+      [{ fileName: 'anna.json', ok: true, pkg: parsedIncoming.pkg }],
+      { [parsedIncoming.pkg.id]: 'same_teacher' },
+      batchTs
+    );
+    expect(resAsSame.added).toBe(0);
+    expect(resAsSame.diffs).toHaveLength(1);
   });
 });

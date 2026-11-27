@@ -1,9 +1,10 @@
 import React from 'react';
 import { AlertCircle, Check, HardDriveDownload, X } from 'lucide-react';
 import { APP_VERSION } from '../../data/changelog';
+import { LEGAL_DOCUMENTS_VERSION } from '../../utils/storage';
 
 export const TERMS_EFFECTIVE_DATE =
-  '27.11.2026 r. (do potwierdzenia daty wdrożenia przez wydawcę; pierwotnie od 24.11.2026 r.)';
+  'Data wejścia w życie: do uzupełnienia przez wydawcę';
 
 export const LICENSE_FULL_TITLE =
   'Ograniczona licencja bezpłatnego użytku edukacyjnego i prywatnego (WLDE)';
@@ -68,7 +69,7 @@ export const RegulaminContent: React.FC = () => {
           Regulamin i Polityka Prywatności aplikacji „E-Sprawozdania — Kreator Sprawozdań Szkolnych”
         </h2>
         <p className="mt-1 text-xs text-slate-500 font-mono-tabular">
-          Wersja {APP_VERSION} · {TERMS_EFFECTIVE_DATE}
+          Wersja dokumentów prawnych {LEGAL_DOCUMENTS_VERSION} (dla aplikacji v{APP_VERSION}) · {TERMS_EFFECTIVE_DATE}
         </p>
       </div>
 
@@ -240,10 +241,10 @@ export const RegulaminContent: React.FC = () => {
           </li>
         </ol>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
-          <p className="font-semibold text-slate-800">Archiwum wersji dokumentu:</p>
+          <p className="font-semibold text-slate-800">Archiwum wersji dokumentów prawnych:</p>
           <p>· Wersja 1.0 — 24.11.2026 r. (pierwotne wydanie Regulaminu i WLDE)</p>
           <p>· Wersja 1.8.0 — 26.11.2026 r. (dostosowanie do eksportu ZIP, PDF, blokady kart i zgody startowej)</p>
-          <p>· Wersja 1.8.1 — 27.11.2026 r. (doprecyzowanie RODO, statusu pomocniczego, limitów importu oraz wyjątków ustawowych pr. aut.)</p>
+          <p>· Wersja {LEGAL_DOCUMENTS_VERSION} — data wejścia w życie do uzupełnienia przez wydawcę (doprecyzowanie RODO, statusu pomocniczego, limitów importu oraz wyjątków ustawowych pr. aut.; obowiązuje także dla aplikacji v{APP_VERSION})</p>
         </div>
       </section>
 
@@ -289,8 +290,9 @@ export const WldeLicenseContent: React.FC = () => {
           Uwaga: skrót „WLDE” ma charakter wyłącznie historyczny. Niniejsza licencja nie jest licencją wolnego oprogramowania ani licencją open source.
         </p>
         <p className="mt-2 text-xs text-slate-600">
-          <strong>Projekt:</strong> E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja{' '}
-          <span className="font-mono-tabular">{APP_VERSION}</span>) · {TERMS_EFFECTIVE_DATE}
+          <strong>Projekt:</strong> E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja aplikacji{' '}
+          <span className="font-mono-tabular">{APP_VERSION}</span>) · <strong>Wersja dokumentów prawnych:</strong>{' '}
+          <span className="font-mono-tabular">{LEGAL_DOCUMENTS_VERSION}</span> · {TERMS_EFFECTIVE_DATE}
         </p>
         <p className="mt-1 text-xs text-slate-600">
           <strong>Autor autorskiej warstwy programu:</strong> mgr Krzysztof Jureczek · Copyright © 2026 Krzysztof Jureczek.
@@ -379,7 +381,16 @@ export const WldeLicenseContent: React.FC = () => {
             Prawa do autorskiego kodu, interfejsu i dokumentacji stworzonych przez Autora przysługują Autorowi (z zastrzeżeniem weryfikacji ewentualnych praw wynikających ze stosunku pracy lub źródeł pochodzenia poszczególnych fragmentów).
           </li>
           <li>
-            Oprogramowanie wykorzystuje komponenty zewnętrzne podmiotów trzecich (m.in. React, Vite, Tailwind CSS, fflate, jsPDF, html2canvas-pro, lucide-react, pakiety fontów @fontsource/*). Prawa do tych elementów są regulowane ich własnymi licencjami (m.in. MIT, Apache-2.0, SIL OFL, ISC), a niniejsza licencja nie ogranicza uprawnień wynikających z tych licencji.
+            Oprogramowanie wykorzystuje komponenty zewnętrzne podmiotów trzecich (m.in. React, Vite, Tailwind CSS, fflate, jsPDF, html2canvas-pro, lucide-react, pakiety fontów @fontsource/*). Prawa do tych elementów są regulowane ich własnymi licencjami (m.in. MIT, Apache-2.0, SIL OFL, ISC), a niniejsza licencja nie ogranicza uprawnień wynikających z tych licencji. Pełne noty i teksty licencji komponentów zewnętrznych udostępniono w pliku{' '}
+            <a
+              href="./THIRD_PARTY_NOTICES.txt"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-blue-900 underline"
+            >
+              THIRD_PARTY_NOTICES.txt
+            </a>
+            .
           </li>
           <li>
             Wyłącznym dysponentem dokumentów, sprawozdań, wniosków i kopii JSON/ZIP utworzonych przez Użytkownika pozostaje Użytkownik lub właściwa placówka oświatowa zgodnie ze stosunkiem pracy i procedurami placówki.
@@ -415,7 +426,7 @@ export const WldeLicenseContent: React.FC = () => {
           W sprawach nieuregulowanych niniejszą licencją zastosowanie mają przepisy ustawy z dnia 4 lutego 1994 r. o prawie autorskim i prawach pokrewnych oraz Kodeksu cywilnego.
         </p>
         <p className="text-xs italic text-slate-500">
-          Ostatnia aktualizacja treści licencji: 27.11.2026 r. (pierwotnie listopad 2026 r.).
+          Wersja dokumentów prawnych: {LEGAL_DOCUMENTS_VERSION} · Data ostatniej aktualizacji treści licencji: do uzupełnienia przez wydawcę.
         </p>
       </section>
     </article>

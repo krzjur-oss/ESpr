@@ -4,12 +4,18 @@ import { AppState } from '../../types/reports';
 import { createDefaultProfile, createDocumentByType, createInitialAppState } from '../documentFactory';
 import {
   BACKUP_REMINDER_INTERVAL_DAYS,
+  BACKUP_REMINDER_LS_KEY,
   DB_NAME,
   DB_VERSION,
   LEGACY_STORAGE_KEY,
+  LEGAL_DOCUMENTS_VERSION,
+  MAX_IMPORT_FILE_BYTES,
   MAX_IMPORT_JSON_CHARS,
+  TERMS_ACCEPTANCE_LS_KEY,
   acceptTermsAndConditions,
+  createScopedBackupState,
   exportRawIndexedDbBackup,
+  exportStateAsJsonWithSummary,
   getCurrentRevision,
   getCurrentStorageBackend,
   getSaveStatus,
@@ -31,6 +37,7 @@ import {
   validateAndParseImportedJson,
   validateAndParseSharedPhrasesJson,
   validateAndParseSupervisionPackageJson,
+  wipeDatabaseForRecovery,
 } from '../storage';
 
 class MemoryStorage implements Storage {
@@ -769,16 +776,17 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       const secondBootBeforeAccept = await loadAppState();
       expect(secondBootBeforeAccept.requiresTermsAcceptance).toBe(true);
 
-      // Zatwierdzenie zapisuje zgodę w IndexedDB i localStorage
-      const accepted = await acceptTermsAndConditions('1.8.0');
+      // Zatwierdzenie zapisuje zgodę w IndexedDB i localStorage dla aktualnej wersji dokumentów prawnych
+      const accepted = await acceptTermsAndConditions(LEGAL_DOCUMENTS_VERSION);
       expect(accepted.accepted).toBe(true);
+      expect(accepted.version).toBe('1.8.1');
 
       resetStorageRuntimeForTests();
       const bootAfterAccept = await loadAppState();
       expect(bootAfterAccept.requiresTermsAcceptance).toBe(false);
     });
 
-    it('nie blokuje istniejących użytkowników z zapisaną bazą sprzed wprowadzenia regulaminu', async () => {
+    it('wymaga akceptacji regulaminu dla istniejącej bazy bez rekordu zgody bez usuwania danych użytkownika', async () => {
       const existingState = createInitialAppState();
       existingState.profile.fullName = 'Anna Nowak';
       await saveAppStateImmediate(existingState, {
@@ -788,28 +796,120 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
 
       resetStorageRuntimeForTests();
       const boot = await loadAppState();
+      expect(boot.requiresTermsAcceptance).toBe(true);
       expect(boot.state.profile.fullName).toBe('Anna Nowak');
-      expect(boot.requiresTermsAcceptance).toBe(false);
+      expect(boot.state.documents).toHaveLength(existingState.documents.length);
+
+      // Brak akceptacji po kolejnym odświeżeniu nadal nie usuwa danych
+      resetStorageRuntimeForTests();
+      const bootAgain = await loadAppState();
+      expect(bootAgain.requiresTermsAcceptance).toBe(true);
+      expect(bootAgain.state.profile.fullName).toBe('Anna Nowak');
+
+      // Po akceptacji dane pozostają nienaruszone i monit znika
+      await acceptTermsAndConditions();
+      resetStorageRuntimeForTests();
+      const bootAccepted = await loadAppState();
+      expect(bootAccepted.requiresTermsAcceptance).toBe(false);
+      expect(bootAccepted.state.profile.fullName).toBe('Anna Nowak');
     });
 
-    it('wymaga ponownego potwierdzenia regulaminu przy starszej wersji zgody bez utraty zapisanych danych', async () => {
+    it('wymaga ponownego potwierdzenia regulaminu przy rekordzie 1.8.0 lub bez pola version oraz akceptuje 1.8.1', async () => {
       const { state } = await loadAppState();
       await saveAppStateImmediate({
         ...state,
         profile: { ...state.profile, fullName: 'Marek Zieliński' },
       });
-      await acceptTermsAndConditions('1.7.1');
+
+      // Starsza wersja 1.8.0 -> wymaga ponownej zgody bez utraty danych
+      await acceptTermsAndConditions('1.8.0');
+      resetStorageRuntimeForTests();
+      const boot180 = await loadAppState();
+      expect(boot180.requiresTermsAcceptance).toBe(true);
+      expect(boot180.state.profile.fullName).toBe('Marek Zieliński');
+      expect(boot180.state.documents.length).toBe(state.documents.length);
+
+      // Rekord bez pola version -> traktowany jako nieważna zgoda
+      memoryLs.setItem(
+        TERMS_ACCEPTANCE_LS_KEY,
+        JSON.stringify({ accepted: true, pending: false, acceptedAt: '2026-11-27T10:00:00.000Z' })
+      );
+      await new Promise<void>((resolve, reject) => {
+        const req = globalThis.indexedDB.open(DB_NAME, DB_VERSION);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction(['meta'], 'readwrite');
+          tx.objectStore('meta').put({
+            key: 'termsAcceptance',
+            value: { accepted: true, pending: false, acceptedAt: '2026-11-27T10:00:00.000Z' },
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+        req.onerror = () => reject(req.error);
+      });
+      resetStorageRuntimeForTests();
+      const bootNoVersion = await loadAppState();
+      expect(bootNoVersion.requiresTermsAcceptance).toBe(true);
+      expect(bootNoVersion.state.profile.fullName).toBe('Marek Zieliński');
+
+      // Aktualna wersja 1.8.1 -> brak wymogu monitu
+      await acceptTermsAndConditions('1.8.1');
+      resetStorageRuntimeForTests();
+      const boot181 = await loadAppState();
+      expect(boot181.requiresTermsAcceptance).toBe(false);
+    });
+
+    it('wybiera nowszą akceptację między IndexedDB (1.8.0) a localStorage (1.8.1) oraz weryfikuje tryb pamięciowy', async () => {
+      await loadAppState();
+      await acceptTermsAndConditions('1.8.0');
+      // Zapisz nowszą zgodę 1.8.1 tylko w localStorage (IndexedDB nadal ma 1.8.0)
+      memoryLs.setItem(
+        TERMS_ACCEPTANCE_LS_KEY,
+        JSON.stringify({
+          accepted: true,
+          pending: false,
+          acceptedAt: '2026-11-27T12:00:00.000Z',
+          version: '1.8.1',
+        })
+      );
 
       resetStorageRuntimeForTests();
-      const boot = await loadAppState();
-      expect(boot.requiresTermsAcceptance).toBe(true);
-      expect(boot.state.profile.fullName).toBe('Marek Zieliński');
-      expect(boot.state.documents.length).toBe(state.documents.length);
+      const bootMixed = await loadAppState();
+      expect(bootMixed.requiresTermsAcceptance).toBe(false);
+
+      // Gałąź catch (brak IndexedDB / tryb pamięciowy) przy rekordzie 1.8.0 musi wymagać zgody
+      memoryLs.setItem(
+        TERMS_ACCEPTANCE_LS_KEY,
+        JSON.stringify({
+          accepted: true,
+          pending: false,
+          acceptedAt: '2026-11-26T12:00:00.000Z',
+          version: '1.8.0',
+        })
+      );
+      Object.defineProperty(globalThis, 'indexedDB', {
+        value: {
+          open: () => {
+            throw new Error('SecurityError: IndexedDB unavailable');
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      resetStorageRuntimeForTests();
+      const bootMemoryCatch = await loadAppState();
+      expect(bootMemoryCatch.backend).toBe('memory');
+      expect(bootMemoryCatch.requiresTermsAcceptance).toBe(true);
     });
 
     it('ponownie wymaga akceptacji regulaminu po pełnym resecie aplikacji', async () => {
       await loadAppState();
-      await acceptTermsAndConditions('1.8.0');
+      await acceptTermsAndConditions(LEGAL_DOCUMENTS_VERSION);
 
       resetStorageRuntimeForTests();
       const beforeReset = await loadAppState();
@@ -857,6 +957,156 @@ describe('Groups B, C, D: IndexedDB, import/export, konflikty rewizji i migracja
       // Odroczenie ukrywa przypomnienie przez okres snooze
       const snoozedMeta = await snoozeBackupReminder(7);
       expect(shouldShowBackupReminder(editedState, snoozedMeta).show).toBe(false);
+    });
+  });
+
+  describe('Group F: Eksport ponad limit, zawężenie do roku, obsługa błędów i odtwarzanie po blokadzie', () => {
+    it('oznacza eksport JSON przekraczający 25 MiB oraz pozwala wyeksportować poprawną kopię zawężoną do roku szkolnego', () => {
+      const origDoc = globalThis.document;
+      const origUrl = globalThis.URL;
+      Object.defineProperty(globalThis, 'document', {
+        value: {
+          createElement: () => ({
+            href: '',
+            download: '',
+            rel: '',
+            style: {},
+            click: () => {},
+            remove: () => {},
+          }),
+          body: { appendChild: () => {} },
+        },
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(globalThis, 'URL', {
+        value: {
+          createObjectURL: () => 'blob:mock-export',
+          revokeObjectURL: () => {},
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      try {
+        const base = createInitialAppState();
+        const hugeDoc2025 = createDocumentByType('karta_informacyjna', base.profile);
+        hugeDoc2025.schoolYear = '2025/2026';
+        if (hugeDoc2025.type === 'karta_informacyjna') {
+          hugeDoc2025.studentAchievements = 'A'.repeat(MAX_IMPORT_FILE_BYTES + 200_000);
+        }
+
+        const smallDoc2026 = createDocumentByType('efekty_nauczania', base.profile);
+        smallDoc2026.schoolYear = '2026/2027';
+
+        const hugeState: AppState = {
+          ...base,
+          documents: [hugeDoc2025, smallDoc2026],
+          activeDocumentId: smallDoc2026.id,
+        };
+
+        const fullSummary = exportStateAsJsonWithSummary(hugeState);
+        expect(fullSummary.ok).toBe(true);
+        expect(fullSummary.byteLength).toBeGreaterThan(MAX_IMPORT_FILE_BYTES);
+        expect(fullSummary.evaluation.overLimit).toBe(true);
+
+        const scopedState = createScopedBackupState(hugeState, {
+          schoolYear: '2026/2027',
+          includeRelatedBases: false,
+        });
+        expect(scopedState.documents).toHaveLength(1);
+        expect(scopedState.documents[0]?.schoolYear).toBe('2026/2027');
+
+        const scopedSummary = exportStateAsJsonWithSummary(hugeState, {
+          schoolYear: '2026/2027',
+          includeRelatedBases: false,
+        });
+        expect(scopedSummary.ok).toBe(true);
+        expect(scopedSummary.evaluation.overLimit).toBe(false);
+        expect(scopedSummary.filename).toContain('2026-2027');
+
+        const parsedScoped = validateAndParseImportedJson(
+          JSON.stringify({
+            app: 'E-Sprawozdania',
+            kind: 'full_backup',
+            exportedAt: new Date().toISOString(),
+            ...scopedState,
+          })
+        );
+        expect(parsedScoped.ok).toBe(true);
+      } finally {
+        Object.defineProperty(globalThis, 'document', {
+          value: origDoc,
+          configurable: true,
+          writable: true,
+        });
+        Object.defineProperty(globalThis, 'URL', {
+          value: origUrl,
+          configurable: true,
+          writable: true,
+        });
+      }
+    });
+
+    it('rozróżnia błąd składni JSON od wewnętrznego błędu przetwarzania kopii', () => {
+      const syntaxErr = validateAndParseImportedJson('{bad json');
+      expect(syntaxErr.ok).toBe(false);
+      if (!syntaxErr.ok) {
+        expect(syntaxErr.error).toContain('Nie udało się odczytać pliku JSON');
+      }
+
+      const validPayload = JSON.stringify({
+        app: 'E-Sprawozdania',
+        version: 1,
+        profile: createDefaultProfile(),
+        documents: [createDocumentByType('efekty_nauczania', createDefaultProfile())],
+      });
+      const origIsArray = Array.isArray;
+      let calls = 0;
+      vi.spyOn(Array, 'isArray').mockImplementation((arg: unknown) => {
+        calls += 1;
+        // First call is !Array.isArray(val) inside isPlainObject(data); throw inside processing try/catch
+        if (calls >= 3) {
+          throw new Error('Simulated sanitizer failure');
+        }
+        return origIsArray(arg);
+      });
+
+      const processingErr = validateAndParseImportedJson(validPayload);
+      expect(processingErr.ok).toBe(false);
+      if (!processingErr.ok) {
+        expect(processingErr.error).toBe('Nie udało się przetworzyć kopii zapasowej.');
+      }
+    });
+
+    it('wipeDatabaseForRecovery raportuje blokadę bez kasowania localStorage i zachowuje akceptację regulaminu przy sukcesie', async () => {
+      await loadAppState();
+      await acceptTermsAndConditions(LEGAL_DOCUMENTS_VERSION);
+      memoryLs.setItem(BACKUP_REMINDER_LS_KEY, JSON.stringify({ lastBackupExportAt: null, snoozedUntil: null }));
+
+      const idb = globalThis.indexedDB as unknown as {
+        deleteDatabase: (name: string) => IDBOpenDBRequest;
+      };
+      vi.spyOn(idb, 'deleteDatabase').mockImplementationOnce(() => {
+        const fakeReq = { onblocked: null } as unknown as IDBOpenDBRequest;
+        setTimeout(() => {
+          fakeReq.onblocked?.call(fakeReq, new Event('blocked') as IDBVersionChangeEvent);
+        }, 0);
+        return fakeReq;
+      });
+
+      const blockedRes = await wipeDatabaseForRecovery();
+      expect(blockedRes.ok).toBe(false);
+      if (!blockedRes.ok) {
+        expect(blockedRes.blocked).toBe(true);
+        expect(blockedRes.error).toBe('Zamknij pozostałe karty aplikacji i spróbuj ponownie.');
+      }
+      expect(memoryLs.getItem(TERMS_ACCEPTANCE_LS_KEY)).not.toBeNull();
+      expect(memoryLs.getItem(BACKUP_REMINDER_LS_KEY)).not.toBeNull();
+
+      const okRes = await wipeDatabaseForRecovery();
+      expect(okRes.ok).toBe(true);
+      expect(memoryLs.getItem(TERMS_ACCEPTANCE_LS_KEY)).not.toBeNull();
     });
   });
 });

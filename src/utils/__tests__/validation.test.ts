@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DocumentType } from '../../types/reports';
 import { createDefaultProfile, createDocumentByType } from '../documentFactory';
 import {
+  MAX_SUPPORTED_BACKUP_VERSION,
   isValidReportDocument,
   sanitizeCustomTemplates,
   sanitizeCustomWnioski,
@@ -243,5 +244,51 @@ describe('Group A: Walidacja i sanitizacja', () => {
     expect(sanitized[0]?.isLocked).toBe(true);
     expect(sanitized[1]?.isLocked).toBe(false);
     expect(sanitized[2]?.isLocked).toBe(false);
+  });
+
+  it('odrzuca nieobsługiwaną wersję formatu danych > 1, zachowuje zgodność ze starszą kopią bez pola app i raportuje obcięcie pól > 100 000 znaków', () => {
+    const profile = createDefaultProfile();
+    const doc = createDocumentByType('efekty_nauczania', profile);
+
+    const futureVersionRes = validateAndParseImportedJson(
+      JSON.stringify({
+        app: 'E-Sprawozdania',
+        version: MAX_SUPPORTED_BACKUP_VERSION + 1,
+        profile,
+        documents: [doc],
+      })
+    );
+    expect(futureVersionRes.ok).toBe(false);
+    if (!futureVersionRes.ok) {
+      expect(futureVersionRes.error).toContain('nowszej, nieobsługiwanej wersji');
+    }
+
+    // Starsza kopia v1.0 bez pola app (ale z poprawnymi profile i documents) musi nadal przejść
+    const legacyNoAppRes = validateAndParseImportedJson(
+      JSON.stringify({
+        version: 1,
+        profile,
+        documents: [doc],
+      })
+    );
+    expect(legacyNoAppRes.ok).toBe(true);
+
+    // Pole tekstowe > 100 000 znaków zwraca czytelne ostrzeżenie o obcięciu
+    if (doc.type === 'efekty_nauczania') {
+      doc.futureConclusions = 'Z'.repeat(100_050);
+    }
+    const truncatedRes = validateAndParseImportedJson(
+      JSON.stringify({
+        app: 'E-Sprawozdania',
+        version: 1,
+        profile,
+        documents: [doc],
+      })
+    );
+    expect(truncatedRes.ok).toBe(true);
+    if (truncatedRes.ok) {
+      expect(truncatedRes.truncatedFieldsCount).toBe(1);
+      expect(truncatedRes.warnings).toContain('Obcięto 1 pól dłuższych niż 100 000 znaków.');
+    }
   });
 });

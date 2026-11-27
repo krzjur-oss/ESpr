@@ -34,6 +34,8 @@ interface FakeElementStub {
   height: number;
   scrollWidth: number;
   offsetWidth: number;
+  scrollHeight: number;
+  offsetHeight: number;
   children: FakeElementStub[];
   parentNode: { removeChild: (child: FakeElementStub) => void } | null;
   classList: { remove: (...names: string[]) => void };
@@ -56,6 +58,8 @@ function createFakeElement(tag: string): FakeElementStub {
     height: 0,
     scrollWidth: 794,
     offsetWidth: 794,
+    scrollHeight: 1123,
+    offsetHeight: 1123,
     children: [],
     parentNode: null,
     classList: {
@@ -72,7 +76,14 @@ function createFakeElement(tag: string): FakeElementStub {
       el.children.push(child);
       return child;
     },
-    cloneNode: () => createFakeElement(tag),
+    cloneNode: () => {
+      const cloned = createFakeElement(tag);
+      cloned.scrollWidth = el.scrollWidth;
+      cloned.offsetWidth = el.offsetWidth;
+      cloned.scrollHeight = el.scrollHeight;
+      cloned.offsetHeight = el.offsetHeight;
+      return cloned;
+    },
     click: vi.fn(),
     remove: () => {
       el.parentNode?.removeChild(el);
@@ -240,5 +251,50 @@ describe('Direct PDF export (jsPDF + html2canvas-pro)', () => {
     const slice = findSafeSliceHeightPx(canvas, 0, 1131);
     expect(slice).toBeGreaterThanOrEqual(735);
     expect(slice).toBeLessThanOrEqual(1131);
+  });
+
+  it('rejestruje pominięte puste płótno (0x0) w zestawie mieszanym oraz zwraca błąd, gdy pominięto wszystkie arkusze', async () => {
+    const validSheet = createFakeElement('article') as unknown as HTMLElement;
+    const emptySheet = createFakeElement('article') as unknown as HTMLElement;
+
+    html2CanvasSpy
+      .mockResolvedValueOnce(createFakeCanvas(1588, 2245))
+      .mockResolvedValueOnce(createFakeCanvas(0, 0));
+
+    const mixedRes = await exportElementsToPdf([validSheet, emptySheet], 'mieszany-komplet');
+    expect(mixedRes.ok).toBe(true);
+    if (mixedRes.ok) {
+      expect(mixedRes.pageCount).toBe(1);
+      expect(mixedRes.skipped).toEqual([{ index: 2, title: 'Karta #2' }]);
+    }
+
+    html2CanvasSpy
+      .mockResolvedValueOnce(createFakeCanvas(0, 0))
+      .mockResolvedValueOnce(createFakeCanvas(0, 0));
+
+    const allEmptyRes = await exportElementsToPdf([validSheet, emptySheet], 'same-puste');
+    expect(allEmptyRes.ok).toBe(false);
+    if (!allEmptyRes.ok) {
+      expect(allEmptyRes.error).toContain('wszystkie arkusze');
+      expect(allEmptyRes.skipped).toHaveLength(2);
+    }
+  });
+
+  it('obniża skalę renderowania bardzo wysokiego arkusza przed wywołaniem html2canvas', async () => {
+    const tallSheet = createFakeElement('article');
+    tallSheet.scrollWidth = 794;
+    tallSheet.scrollHeight = 12_000;
+
+    html2CanvasSpy.mockResolvedValueOnce(createFakeCanvas(794, 12_000));
+
+    const res = await exportElementsToPdf(
+      [tallSheet as unknown as HTMLElement],
+      'dluga-karta'
+    );
+    expect(res.ok).toBe(true);
+    const passedOptions = html2CanvasSpy.mock.calls[0]?.[1] as { scale?: number } | undefined;
+    expect(passedOptions?.scale).toBeDefined();
+    expect(passedOptions?.scale).toBeGreaterThanOrEqual(1);
+    expect(passedOptions?.scale).toBeLessThan(2);
   });
 });

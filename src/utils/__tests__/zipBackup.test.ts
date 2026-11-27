@@ -19,6 +19,7 @@ import {
 import {
   FULL_BACKUP_ZIP_ENTRY,
   buildBackupZipBytes,
+  buildBackupZipWithStats,
   exportStateAsZip,
   extractBackupJsonFromZip,
   readValidatedBackupFileForImport,
@@ -235,7 +236,7 @@ describe('ZIP backup export & secure restore', () => {
     expect(resZip.ok).toBe(false);
     if (!resZip.ok) {
       expect(resZip.error).toContain('25 MiB');
-      expect(resZip.error).toContain('rozpakuj archiwum .zip');
+      expect(resZip.error).toContain('roku szkolnego');
     }
     expect(arrayBufferSpy).not.toHaveBeenCalled();
     expect(textSpy).not.toHaveBeenCalled();
@@ -413,5 +414,60 @@ describe('ZIP backup export & secure restore', () => {
         writable: true,
       });
     }
+  });
+
+  it('odrzuca archiwum ZIP z nieobsługiwaną metodą kompresji z komunikatem kierującym do kopii z aplikacji lub pliku .json', async () => {
+    const validZip = zipSync({ [FULL_BACKUP_ZIP_ENTRY]: strToU8('{"a":1}') }, { level: 0 });
+    const patched = validZip.slice();
+    const eocdOffset = patched.length - 22;
+    const cdOffset = readU32(patched, eocdOffset + 16);
+    // Ustaw metodę kompresji na nieobsługiwaną (9 = Deflate64) w katalogu centralnym
+    writeU16(patched, cdOffset + 10, 9);
+
+    const res = await extractBackupJsonFromZip(patched.buffer);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain('Użyj archiwum pobranego z aplikacji lub wskaż rozpakowany plik .json.');
+    }
+  });
+
+  it('buduje i odtwarza archiwum .zip zawężone do wybranego roku szkolnego', async () => {
+    const state = createRichTestState();
+    state.documents[0]!.schoolYear = '2025/2026';
+    state.documents[1]!.schoolYear = '2026/2027';
+
+    const scopedZip = buildBackupZipWithStats(state, {
+      schoolYear: '2026/2027',
+      includeRelatedBases: false,
+    });
+    expect(scopedZip.filename).toContain('2026-2027');
+    expect(scopedZip.evaluation.overLimit).toBe(false);
+
+    const extracted = await extractBackupJsonFromZip(scopedZip.bytes.slice().buffer);
+    expect(extracted.ok).toBe(true);
+    if (!extracted.ok) return;
+
+    const validated = validateAndParseImportedJson(extracted.jsonText);
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+
+    expect(validated.state.documents).toHaveLength(1);
+    expect(validated.state.documents[0]?.schoolYear).toBe('2026/2027');
+    expect(validated.state.customWnioski).toEqual([]);
+  });
+
+  it('rozpakowuje strumieniowo duży (~20 MiB) wpis JSON w archiwum ZIP bez przekroczenia limitu czasu', async () => {
+    const targetPayload = `${'{"payload":"'}${'x'.repeat(20 * 1024 * 1024)}${'"}'}`;
+    const storedZip = zipSync({ [FULL_BACKUP_ZIP_ENTRY]: strToU8(targetPayload) }, { level: 0 });
+
+    const start = performance.now();
+    const res = await extractBackupJsonFromZip(storedZip.slice().buffer);
+    const elapsedMs = performance.now() - start;
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.jsonText.length).toBe(targetPayload.length);
+    }
+    expect(elapsedMs).toBeLessThan(10_000);
   });
 });

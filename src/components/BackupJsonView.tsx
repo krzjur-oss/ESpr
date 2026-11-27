@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Download,
   FileArchive,
@@ -11,17 +12,28 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppState } from '../types/reports';
-import { MAX_IMPORT_FILE_MIB } from '../utils/importLimits';
-import { exportStateAsJson, validateAndParseImportedJson } from '../utils/storage';
 import {
-  exportStateAsZip,
+  MAX_IMPORT_FILE_MIB,
+  OVERSIZED_BACKUP_RECOVERY_HINT,
+  formatFileSizeMiB,
+} from '../utils/importLimits';
+import {
+  BackupScopeOptions,
+  exportStateAsJsonWithSummary,
+  getAvailableBackupSchoolYears,
+  serializeBackupJson,
+  validateAndParseImportedJson,
+} from '../utils/storage';
+import {
+  buildBackupZipWithStats,
+  exportStateAsZipWithSummary,
   readValidatedBackupFileForImport,
 } from '../utils/zipBackup';
 
 interface BackupJsonViewProps {
   state: AppState;
   lastBackupExportAt?: string | null;
-  onImportState: (nextState: AppState) => void;
+  onImportState: (nextState: AppState, warnings?: string[]) => void;
   onRequestFullReset: () => void;
   onOpenShareModal: (mode: 'export' | 'import') => void;
   onOpenSupervisionExport: () => void;
@@ -38,10 +50,45 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
   onGoToSupervision,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [exportYearScope, setExportYearScope] = useState<string>('all');
+  const [includeRelatedBases, setIncludeRelatedBases] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{
-    type: 'success' | 'error';
+    type: 'success' | 'warning' | 'error';
     message: string;
   } | null>(null);
+
+  const availableYears = useMemo(() => getAvailableBackupSchoolYears(state), [state]);
+
+  const effectiveYearScope =
+    exportYearScope !== 'all' && availableYears.includes(exportYearScope)
+      ? exportYearScope
+      : 'all';
+
+  const exportScopeOptions: BackupScopeOptions = useMemo(
+    () => ({
+      schoolYear: effectiveYearScope,
+      includeRelatedBases: effectiveYearScope === 'all' ? true : includeRelatedBases,
+    }),
+    [effectiveYearScope, includeRelatedBases]
+  );
+
+  const exportEstimate = useMemo(() => {
+    const jsonStats = serializeBackupJson(state, exportScopeOptions);
+    const zipStats = buildBackupZipWithStats(state, exportScopeOptions);
+    return {
+      scopedDocsCount: jsonStats.scopedState.documents.length,
+      jsonBytes: jsonStats.byteLength,
+      jsonEval: jsonStats.evaluation,
+      zipBytes: zipStats.bytes.byteLength,
+      zipEval: zipStats.evaluation,
+    };
+  }, [state, exportScopeOptions]);
+
+  const isAnyOverLimit =
+    exportEstimate.jsonEval.overLimit || exportEstimate.zipEval.overLimit;
+  const isAnyNearLimit =
+    !isAnyOverLimit &&
+    (exportEstimate.jsonEval.nearLimit || exportEstimate.zipEval.nearLimit);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,7 +111,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
       const parsed = validateAndParseImportedJson(readResult.jsonText);
       if (parsed.ok) {
         setFeedback(null);
-        onImportState(parsed.state);
+        onImportState(parsed.state, parsed.warnings);
       } else {
         setFeedback({
           type: 'error',
@@ -94,14 +141,19 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
 
       {feedback && (
         <div
+          role={feedback.type === 'error' ? 'alert' : 'status'}
           className={`mb-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${
             feedback.type === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-              : 'border-red-200 bg-red-50 text-red-900'
+              : feedback.type === 'warning'
+                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                : 'border-red-200 bg-red-50 text-red-900'
           }`}
         >
           {feedback.type === 'success' ? (
             <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+          ) : feedback.type === 'warning' ? (
+            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
           ) : (
             <AlertCircle className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
           )}
@@ -114,31 +166,86 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
         <section className="rounded-xl border border-slate-200 bg-white p-6 flex flex-col justify-between">
           <div>
             <h2 className="text-base font-semibold text-slate-900">
-              Eksport pełnej sesji (ZIP lub JSON)
+              Eksport sesji (ZIP lub JSON)
             </h2>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-              Pobierz spakowane archiwum <strong className="font-mono-tabular">.zip</strong> (pełna kopia plus osobne pliki dla profilu, wszystkich dokumentów ({state.documents.length}) i baz danych) albo pojedynczy plik <strong className="font-mono-tabular">.json</strong>.
+              Pobierz spakowane archiwum <strong className="font-mono-tabular">.zip</strong> (pełna kopia plus osobne pliki dla profilu, dokumentów ({exportEstimate.scopedDocsCount}) i wybranych baz danych) albo pojedynczy plik <strong className="font-mono-tabular">.json</strong>.
             </p>
-            <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
+
+            {/* Scope selector (F-02) */}
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2.5">
+              <div>
+                <label
+                  htmlFor="backup-year-scope"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Zakres eksportowanych dokumentów
+                </label>
+                <select
+                  id="backup-year-scope"
+                  value={effectiveYearScope}
+                  onChange={(e) => setExportYearScope(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-900 focus:outline-none"
+                >
+                  <option value="all">
+                    Pełna sesja (wszystkie lata · {state.documents.length} dok.)
+                  </option>
+                  {availableYears.map((yr) => {
+                    const countForYear = state.documents.filter(
+                      (d) => d.schoolYear.trim() === yr
+                    ).length;
+                    return (
+                      <option key={yr} value={yr}>
+                        Tylko rok szkolny {yr} ({countForYear} dok.)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              {effectiveYearScope !== 'all' && (
+                <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeRelatedBases}
+                    onChange={(e) => setIncludeRelatedBases(e.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
+                  />
+                  <span>
+                    Dołącz bazy własnych wniosków, szablonów oraz paczki nadzoru
+                  </span>
+                </label>
+              )}
+            </div>
+
+            <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
               <p>
                 Nauczyciel / specjalista:{' '}
                 <strong className="text-slate-900">{state.profile.fullName || 'Nie podano'}</strong>
               </p>
               <p>
-                Liczba dokumentów w sesji:{' '}
-                <strong className="font-mono-tabular text-slate-900">{state.documents.length}</strong>
+                Dokumenty w bieżącym zakresie:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {exportEstimate.scopedDocsCount}
+                </strong>
+                {effectiveYearScope !== 'all' && (
+                  <span className="text-slate-500"> (z {state.documents.length} w sesji)</span>
+                )}
               </p>
               <p>
-                Własne wnioski w bazie:{' '}
-                <strong className="font-mono-tabular text-slate-900">{state.customWnioski.length}</strong>
+                Szacowany rozmiar:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  ZIP {formatFileSizeMiB(exportEstimate.zipBytes)} · JSON{' '}
+                  {formatFileSizeMiB(exportEstimate.jsonBytes)}
+                </strong>{' '}
+                <span className="text-slate-500">(limit importu: {MAX_IMPORT_FILE_MIB} MiB)</span>
               </p>
               <p>
-                Szablony własne fragmentów:{' '}
-                <strong className="font-mono-tabular text-slate-900">{state.customTemplates.length}</strong>
-              </p>
-              <p>
-                Paczki nadzoru w bazie:{' '}
-                <strong className="font-mono-tabular text-slate-900">{state.supervisionPackages.length}</strong>
+                Własne wnioski / szablony / paczki nadzoru:{' '}
+                <strong className="font-mono-tabular text-slate-900">
+                  {effectiveYearScope !== 'all' && !includeRelatedBases
+                    ? '0 / 0 / 0 (wykluczone)'
+                    : `${state.customWnioski.length} / ${state.customTemplates.length} / ${state.supervisionPackages.length}`}
+                </strong>
               </p>
               <p>
                 Ostatnia kopia zapasowa:{' '}
@@ -152,6 +259,30 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
                 </strong>
               </p>
             </div>
+
+            {isAnyOverLimit && (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 leading-relaxed space-y-1"
+              >
+                <p className="font-semibold">
+                  Ta kopia przekracza limit importu ({MAX_IMPORT_FILE_MIB} MiB) i nie zostanie wczytana przez aplikację w tej wersji.
+                </p>
+                <p>
+                  Możesz nadal pobrać ją jako archiwum awaryjne albo zmniejszyć rozmiar przed eksportem: wybierz powyżej konkretny rok szkolny, odznacz dołączanie dużych baz albo wyeksportuj osobno paczki nadzoru oraz wnioski i szablony.
+                </p>
+              </div>
+            )}
+
+            {isAnyNearLimit && (
+              <div
+                role="status"
+                className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 leading-relaxed"
+              >
+                <strong>Uwaga na rozmiar kopii:</strong> eksport przekracza 80% limitu importu ({MAX_IMPORT_FILE_MIB} MiB). Przy dalszym rozroście danych zalecamy eksport z podziałem na wybrane lata szkolne.
+              </div>
+            )}
+
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 leading-relaxed">
               <strong>Uwaga RODO i bezpieczeństwo:</strong> Lokalna baza IndexedDB oraz eksportowane pliki JSON, archiwa ZIP i paczki nadzoru nie są szyfrowane przez aplikację i mogą zawierać dane osobowe uczniów (w tym dane o stanie zdrowia lub niepełnosprawności) oraz nauczycieli. Chroń urządzenie hasłem i blokadą ekranu, nie przesyłaj kopii niezabezpieczonym kanałem i usuń pliki po użyciu. Wyczyszczenie danych witryny nie usuwa kopii zapisanych na dysku.
             </div>
@@ -161,13 +292,22 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                const ok = exportStateAsZip(state);
-                if (ok) {
-                  setFeedback({
-                    type: 'success',
-                    message:
-                      'Pobrano archiwum ZIP zawierające pełną kopię zapasową, profil, wszystkie dokumenty oraz bazy wniosków, szablonów i nadzoru.',
-                  });
+                const res = exportStateAsZipWithSummary(state, exportScopeOptions);
+                if (res.ok) {
+                  if (res.evaluation.overLimit) {
+                    setFeedback({
+                      type: 'warning',
+                      message: `Pobrano archiwum ZIP (${formatFileSizeMiB(res.byteLength)}), ale przekracza ono limit importu (${MAX_IMPORT_FILE_MIB} MiB) i nie zostanie wczytane przez aplikację w tej wersji. Aby uzyskać mniejszą kopię do przenoszenia, wybierz pojedynczy rok szkolny lub osobne eksporty.`,
+                    });
+                  } else {
+                    setFeedback({
+                      type: 'success',
+                      message:
+                        effectiveYearScope !== 'all'
+                          ? `Pobrano archiwum ZIP dla roku szkolnego ${effectiveYearScope} (${exportEstimate.scopedDocsCount} dok.).`
+                          : 'Pobrano archiwum ZIP zawierające pełną kopię zapasową, profil, wszystkie dokumenty oraz bazy wniosków, szablonów i nadzoru.',
+                    });
+                  }
                 } else {
                   setFeedback({
                     type: 'error',
@@ -183,12 +323,22 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                const ok = exportStateAsJson(state);
-                if (ok) {
-                  setFeedback({
-                    type: 'success',
-                    message: 'Pobrano pojedynczy plik kopii zapasowej JSON.',
-                  });
+                const res = exportStateAsJsonWithSummary(state, exportScopeOptions);
+                if (res.ok) {
+                  if (res.evaluation.overLimit) {
+                    setFeedback({
+                      type: 'warning',
+                      message: `Pobrano plik JSON (${formatFileSizeMiB(res.byteLength)}), ale przekracza on limit importu (${MAX_IMPORT_FILE_MIB} MiB) i nie zostanie wczytany przez aplikację w tej wersji. Wybierz powyżej pojedynczy rok szkolny lub mniejszy zakres.`,
+                    });
+                  } else {
+                    setFeedback({
+                      type: 'success',
+                      message:
+                        effectiveYearScope !== 'all'
+                          ? `Pobrano kopię zapasową JSON dla roku szkolnego ${effectiveYearScope}.`
+                          : 'Pobrano pojedynczy plik kopii zapasowej JSON.',
+                    });
+                  }
                 } else {
                   setFeedback({
                     type: 'error',
@@ -214,7 +364,7 @@ export const BackupJsonView: React.FC<BackupJsonViewProps> = ({
               Wczytaj wcześniej zapisaną kopię zapasową (<code className="font-mono-tabular">.json</code> lub wyeksportowane archiwum <code className="font-mono-tabular">.zip</code>). Przed nadpisaniem bieżącej sesji zostanie wyświetlone potwierdzenie z możliwością wcześniejszego pobrania aktualnej kopii.
             </p>
             <p className="mt-2 text-xs text-slate-500 leading-relaxed">
-              Dopuszczalny rozmiar pliku importu: <strong className="font-mono-tabular text-slate-700">{MAX_IMPORT_FILE_MIB} MiB</strong>. Jeśli kopia jest większa, rozpakuj archiwum <code className="font-mono-tabular">.zip</code> lokalnie lub podziel dokumenty na mniejsze roczniki przed przeniesieniem.
+              Dopuszczalny rozmiar pliku importu: <strong className="font-mono-tabular text-slate-700">{MAX_IMPORT_FILE_MIB} MiB</strong>. {OVERSIZED_BACKUP_RECOVERY_HINT}
             </p>
           </div>
 

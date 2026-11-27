@@ -179,7 +179,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
                   <span>Podgląd A4, bezpośredni PDF i wydruk</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed">
-                  Podgląd arkusza A4 na żywo, bezpośrednie pobieranie pojedynczych kart, kompletów oraz raportów Nadzoru dyrektora jako pliki PDF z paskiem postępu, a także szybki wydruk systemowy bez elementów interfejsu.
+                  Podgląd arkusza A4 na żywo, bezpośrednie pobieranie pojedynczych kart, kompletów oraz raportów Nadzoru dyrektora jako pliki PDF z paskiem postępu, a także szybki wydruk systemowy bez elementów interfejsu. Wygenerowany plik PDF zapisuje arkusze jako obrazy, natomiast przycisk „Drukuj” (druk systemowy / „Zapisz jako PDF”) zachowuje tekst możliwy do zaznaczania.
                 </p>
               </div>
 
@@ -243,6 +243,19 @@ export const AboutView: React.FC<AboutViewProps> = ({
                     className="font-medium text-blue-900 hover:underline"
                   >
                     github.com/krzjur-oss
+                  </a>
+                </dd>
+              </div>
+              <div className="pt-1 sm:col-span-2 border-t border-slate-100 mt-1">
+                <dt className="text-xs font-medium text-slate-500">Licencje komponentów zewnętrznych (open source)</dt>
+                <dd className="mt-0.5">
+                  <a
+                    href="./THIRD_PARTY_NOTICES.txt"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-blue-900 hover:underline"
+                  >
+                    Zobacz pełne noty licencyjne zależności (THIRD_PARTY_NOTICES.txt)
                   </a>
                 </dd>
               </div>

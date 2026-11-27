@@ -3,9 +3,9 @@
 
 *Uwaga: skrót „WLDE” ma charakter wyłącznie historyczny. Niniejsza licencja nie jest licencją wolnego oprogramowania ani licencją open source.*
 
-### Projekt: E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja 1.8.1)
+### Projekt: E-Sprawozdania — Kreator Sprawozdań Szkolnych (wersja aplikacji 1.8.2)
 
-**Wersja dokumentu:** 1.8.1 · 27.11.2026 r. (do potwierdzenia daty wdrożenia przez wydawcę; pierwotnie listopad 2026 r.)  
+**Wersja dokumentów prawnych:** 1.8.1 · Data wejścia w życie: do uzupełnienia przez wydawcę  
 **Autor autorskiej warstwy programu:** **mgr Krzysztof Jureczek**  
 *Copyright © 2026 Krzysztof Jureczek.*
 
@@ -61,7 +61,7 @@ Postanowienia umowne sprzeczne z art. 75 ust. 2 i 3 są z mocy art. 76 ustawy ni
 ### § 4. WŁASNOŚĆ INTELEKTUALNA I SKŁADNIKI ZEWNĘTRZNE
 
 1. Prawa do autorskiego kodu, interfejsu i dokumentacji stworzonych przez Autora przysługują Autorowi (z zastrzeżeniem weryfikacji ewentualnych praw wynikających ze stosunku pracy lub źródeł pochodzenia poszczególnych fragmentów).
-2. Oprogramowanie wykorzystuje komponenty zewnętrzne podmiotów trzecich (m.in. `React`, `Vite`, `Tailwind CSS`, `fflate`, `jsPDF`, `html2canvas-pro`, `lucide-react`, pakiety fontów `@fontsource/*`). Prawa do tych elementów są regulowane ich własnymi licencjami (m.in. MIT, Apache-2.0, SIL OFL, ISC), a niniejsza licencja nie ogranicza uprawnień wynikających z tych licencji.
+2. Oprogramowanie wykorzystuje komponenty zewnętrzne podmiotów trzecich (m.in. `React`, `Vite`, `Tailwind CSS`, `fflate`, `jsPDF`, `html2canvas-pro`, `lucide-react`, pakiety fontów `@fontsource/*`). Prawa do tych elementów są regulowane ich własnymi licencjami (m.in. MIT, Apache-2.0, SIL OFL, ISC), a niniejsza licencja nie ogranicza uprawnień wynikających z tych licencji. Pełny wykaz oraz teksty licencji komponentów zewnętrznych znajdują się w pliku [`public/THIRD_PARTY_NOTICES.txt`](./public/THIRD_PARTY_NOTICES.txt) (publikowanym w katalogu głównym aplikacji jako `THIRD_PARTY_NOTICES.txt`).
 3. Wyłącznym dysponentem dokumentów, sprawozdań, wniosków i kopii JSON/ZIP utworzonych przez Użytkownika pozostaje Użytkownik lub właściwa placówka oświatowa zgodnie ze stosunkiem pracy i procedurami placówki.
 
 ---
@@ -85,4 +85,4 @@ Istotne naruszenie warunków korzystania wykraczające poza dozwolony użytek i 
 W sprawach nieuregulowanych niniejszą licencją zastosowanie mają przepisy ustawy z dnia 4 lutego 1994 r. o prawie autorskim i prawach pokrewnych oraz Kodeksu cywilnego.
 
 ---
-*Ostatnia aktualizacja treści licencji: 27.11.2026 r. (pierwotnie listopad 2026 r.).*
+*Wersja dokumentów prawnych: 1.8.1 · Data ostatniej aktualizacji treści licencji: do uzupełnienia przez wydawcę.*

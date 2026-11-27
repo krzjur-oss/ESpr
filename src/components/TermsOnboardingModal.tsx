@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Scale, ShieldCheck } from 'lucide-react';
 import { APP_VERSION } from '../data/changelog';
+import { LEGAL_DOCUMENTS_VERSION } from '../utils/storage';
 import {
   BackupRecommendationCallout,
   LICENSE_FULL_TITLE,
@@ -89,7 +90,8 @@ export const TermsOnboardingModal: React.FC<TermsOnboardingModalProps> = ({
                 id="onboarding-terms-subtitle"
                 className="mt-1 text-xs sm:text-sm text-slate-600"
               >
-                E-Sprawozdania (<span className="font-mono-tabular">v{APP_VERSION}</span>) · Przed rozpoczęciem pracy zapoznaj się z Regulaminem, Polityką Prywatności (RODO), Licencją WLDE oraz zaleceniem kopii zapasowej.
+                E-Sprawozdania (<span className="font-mono-tabular">v{APP_VERSION}</span> · dokumenty prawne{' '}
+                <span className="font-mono-tabular">v{LEGAL_DOCUMENTS_VERSION}</span>) · Przed rozpoczęciem pracy zapoznaj się z Regulaminem, Polityką Prywatności (RODO), Licencją WLDE oraz zaleceniem kopii zapasowej.
               </p>
             </div>
           </div>

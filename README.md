@@ -1,16 +1,16 @@
 # E-Sprawozdania — Kreator Sprawozdań Szkolnych (Local-First PWA)
 
-**Aktualna wersja:** `1.8.1` (listopad 2026) · [Historia zmian (`CHANGELOG.md`)](./CHANGELOG.md)
+**Aktualna wersja:** `1.8.2` (listopad 2026) · [Historia zmian (`CHANGELOG.md`)](./CHANGELOG.md)
 
 Aplikacja webowa w modelu Local-First PWA (działająca offline w przeglądarce po wczytaniu zasobów przez Service Worker) dla nauczycieli, wychowawców, specjalistów i dyrektorów szkół do tworzenia, archiwizowania, podglądu A4, bezpośredniego eksportu PDF oraz drukowania sprawozdań semestralnych i rocznych.
 
 > **Status prawny dokumentów:** E‑Sprawozdania jest narzędziem pomocniczym do przygotowywania roboczych kart, zestawień i sprawozdań. Nie zastępuje dzienników, arkuszy ocen ani innej dokumentacji, której prowadzenie, treść, forma, podpisy i przechowywanie wynikają z przepisów prawa lub procedur placówki. Przed wykorzystaniem dokumentu należy zweryfikować jego zgodność z wymaganiami dyrektora i szkoły.
 
-## Najważniejsze funkcje (v1.8.1)
+## Najważniejsze funkcje (v1.8.2)
 
 - **6 typów roboczych dokumentów szkolnych:** Karta efektów nauczania, Zbiorcze sprawozdanie koordynatora, Karta informacyjna nauczyciela, Podsumowanie efektów pracy specjalisty (6 ról), Uzasadnienie nieklasyfikowania (NKL) oraz Uzasadnienie oceny niedostatecznej (NDST).
-- **Bezpośredni eksport PDF z paskiem postępu:** Generowanie i pobieranie pojedynczych kart, zaznaczonych kompletów oraz raportów zbiorczych klas jako pliki `.pdf` (`jsPDF` + `html2canvas-pro`) z zachowaniem systemowego drukowania A4.
-- **Kopia zapasowa JSON oraz archiwum `.zip` (limit importu 25 MiB):** Eksport i bezpieczne przywracanie pełnej kopii sesji w pliku `.json` lub spakowanym archiwum `.zip` ze strumieniową ochroną przed nadmierną dekompresją.
+- **Bezpośredni eksport PDF z paskiem postępu:** Generowanie i pobieranie pojedynczych kart, zaznaczonych kompletów oraz raportów zbiorczych klas jako pliki `.pdf` (`jsPDF` + `html2canvas-pro`) z adaptacyjnym skalowaniem wysokich kart i zachowaniem systemowego drukowania tekstowego A4.
+- **Kopia zapasowa JSON oraz archiwum `.zip` (limit importu 25 MiB):** Eksport pełnej kopii lub kopii zawężonej do wybranego roku szkolnego z podglądem szacowanego rozmiaru oraz bezpieczne przywracanie ze strumieniową ochroną dekompresji.
 - **Archiwum lat szkolnych i blokada kart:** Filtrowanie i sortowanie dokumentów, przenoszenie kart na nowy rok szkolny, wskaźnik ostatniej modyfikacji oraz blokada zatwierdzonych lub archiwalnych dokumentów (`Zablokuj (archiwum)`).
 - **Nadzór dyrektora:** Eksport podpisanych paczek sprawozdań, porównywanie zmian wersji oraz automatyczne sprawozdania zbiorcze dla każdej klasy.
 - **Architektura Local-First i przejrzystość RODO:** Treści formularzy i dokumentów zapisywane są lokalnie w `IndexedDB` z kontrolą rewizji (bez wysyłania treści dokumentów na serwer i bez automatycznego szyfrowania plików kopii), z lokalnymi fontami oraz obowiązkową zgodą startową (Regulamin RODO, Licencja WLDE, nota o kopiach zapasowych).
@@ -49,6 +49,7 @@ Program jest udostępniany **bezpłatnie dla nauczycieli, specjalistów szkolnyc
 
 - Historia zmian (Changelog): [`CHANGELOG.md`](./CHANGELOG.md)
 - Szczegóły licencji: [`LICENSE.md`](./LICENSE.md)
+- Noty licencyjne komponentów zewnętrznych: [`public/THIRD_PARTY_NOTICES.txt`](./public/THIRD_PARTY_NOTICES.txt)
 - Regulamin i Polityka Prywatności (RODO / IndexedDB): [`REGULAMIN.md`](./REGULAMIN.md)
 
 **Autor:** mgr Krzysztof Jureczek (`kjureczek@proton.me` · `github.com/krzjur-oss`)

@@ -53,7 +53,7 @@ import {
   TemplatesProvider,
 } from './context/TemplatesContext';
 import { APP_VERSION } from './data/changelog';
-import { validateImportFileMetadata } from './utils/importLimits';
+import { formatFileSizeMiB, validateImportFileMetadata } from './utils/importLimits';
 import { suggestCategoryIdForDocument } from './data/wnioskiDatabase';
 import {
   AppState,
@@ -89,6 +89,7 @@ import {
   getBackupReminderMeta,
   getCurrentStorageBackend,
   getSaveStatus,
+  LEGAL_DOCUMENTS_VERSION,
   LegacyMigrationStatus,
   loadAppState,
   mergeImportedTemplates,
@@ -109,11 +110,15 @@ import {
 } from './utils/storage';
 import {
   ClassCollectiveReport,
+  MAX_SUPERVISION_BATCH_FILES,
+  MAX_SUPERVISION_BATCH_TOTAL_BYTES,
+  NameCollisionResolution,
   PackageDiffResult,
   aggregateClassCollectiveReports,
   applySupervisionDiffDecisions,
-  diffSupervisionPackage,
+  findNameOnlySupervisionMatchIndex,
   getAvailableSupervisionYears,
+  mergeSupervisionBatch,
   resolvePackageTeacherName,
 } from './utils/supervision';
 
@@ -194,8 +199,20 @@ export default function App() {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfProgress, setPdfProgress] = useState<PdfExportProgress | null>(null);
   const [pdfNotice, setPdfNotice] = useState<{
-    type: 'success' | 'error';
+    type: 'success' | 'warning' | 'error';
     message: string;
+  } | null>(null);
+
+  const [pendingSupervisionBatch, setPendingSupervisionBatch] = useState<{
+    parsedItems: Array<
+      | { fileName: string; ok: true; pkg: TeacherSupervisionPackage }
+      | { fileName: string; ok: false; error: string }
+    >;
+    collisions: Array<{
+      incoming: TeacherSupervisionPackage;
+      existing: TeacherSupervisionPackage;
+    }>;
+    decisions: Record<string, NameCollisionResolution>;
   } | null>(null);
 
   const [backupDownloadFirst, setBackupDownloadFirst] = useState(true);
@@ -203,7 +220,7 @@ export default function App() {
     | { kind: 'delete_doc'; doc: ReportDocument }
     | { kind: 'reset_doc'; doc: ReportDocument }
     | { kind: 'delete_supervision_pkg'; pkg: TeacherSupervisionPackage }
-    | { kind: 'import_backup'; nextState: AppState }
+    | { kind: 'import_backup'; nextState: AppState; warnings?: string[] }
     | { kind: 'reset_all' }
     | null
   >(null);
@@ -768,7 +785,7 @@ export default function App() {
     if (isAcceptingTerms) return;
     setIsAcceptingTerms(true);
     try {
-      await acceptTermsAndConditions(APP_VERSION);
+      await acceptTermsAndConditions(LEGAL_DOCUMENTS_VERSION);
       setRequiresTermsAcceptance(false);
     } finally {
       setIsAcceptingTerms(false);
@@ -924,89 +941,25 @@ export default function App() {
     setConfirmDialog(null);
   };
 
-  const handleImportSupervisionFiles = async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-
-    const readResults = await Promise.all(
-      fileArray.map(async (file) => {
-        try {
-          const precheck = validateImportFileMetadata(file, { allowZip: false });
-          if (!precheck.ok) {
-            return {
-              fileName: file.name,
-              parsed: { ok: false as const, error: precheck.error },
-            };
-          }
-          const text = await file.text();
-          return { fileName: file.name, parsed: validateAndParseSupervisionPackageJson(text) };
-        } catch {
-          return {
-            fileName: file.name,
-            parsed: { ok: false as const, error: 'Nie udało się odczytać pliku.' },
-          };
-        }
-      })
+  const finalizeSupervisionBatch = (
+    parsedItems: Array<
+      | { fileName: string; ok: true; pkg: TeacherSupervisionPackage }
+      | { fileName: string; ok: false; error: string }
+    >,
+    decisions: Record<string, NameCollisionResolution>
+  ) => {
+    const batchImportedAt = new Date().toISOString();
+    const summary = mergeSupervisionBatch(
+      stateRef.current.supervisionPackages,
+      parsedItems,
+      decisions,
+      batchImportedAt
     );
-
-    const findExistingIndex = (
-      packages: TeacherSupervisionPackage[],
-      incoming: TeacherSupervisionPackage
-    ): number => {
-      const byKey = packages.findIndex((p) => p.teacherKey === incoming.teacherKey);
-      if (byKey !== -1) return byKey;
-      const normName = resolvePackageTeacherName(incoming).trim().toLowerCase();
-      if (!normName || normName.startsWith('nauczyciel (brak')) return -1;
-      const normSchool = incoming.schoolName.trim().toLowerCase();
-      return packages.findIndex((p) => {
-        const pName = resolvePackageTeacherName(p).trim().toLowerCase();
-        const pSchool = p.schoolName.trim().toLowerCase();
-        return pName === normName && (!normSchool || !pSchool || pSchool === normSchool);
-      });
-    };
-
-    const mergeIncomingPackages = (basePackages: TeacherSupervisionPackage[]) => {
-      const working = [...basePackages];
-      const diffs: PackageDiffResult[] = [];
-      let added = 0;
-      let unchanged = 0;
-      const errors: string[] = [];
-
-      for (const item of readResults) {
-        if (!item.parsed.ok) {
-          errors.push(`${item.fileName}: ${item.parsed.error}`);
-          continue;
-        }
-        const incoming = item.parsed.pkg;
-        const existingIdx = findExistingIndex(working, incoming);
-        if (existingIdx === -1) {
-          working.push(incoming);
-          added += 1;
-        } else {
-          const existingPkg = working[existingIdx];
-          if (!existingPkg) continue;
-          const diff = diffSupervisionPackage(existingPkg, incoming);
-          if (diff.hasAnyChanges) {
-            diffs.push(diff);
-          } else {
-            working[existingIdx] = {
-              ...existingPkg,
-              importedAt: new Date().toISOString(),
-            };
-            unchanged += 1;
-          }
-        }
-      }
-
-      return { working, diffs, added, unchanged, errors };
-    };
-
-    const summary = mergeIncomingPackages(stateRef.current.supervisionPackages);
 
     if (summary.added > 0 || summary.unchanged > 0) {
       setState((prev) => ({
         ...prev,
-        supervisionPackages: mergeIncomingPackages(prev.supervisionPackages).working,
+        supervisionPackages: summary.working,
       }));
     }
 
@@ -1035,6 +988,125 @@ export default function App() {
       setSupervisionFeedback({
         type: summary.errors.length > 0 ? 'info' : 'success',
         message: `Zakończono import plików (${parts.join(', ')}). Zestawienia klasowe zostały zaktualizowane.`,
+      });
+    }
+  };
+
+  const handleImportSupervisionFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    if (fileArray.length > MAX_SUPERVISION_BATCH_FILES) {
+      setSupervisionFeedback({
+        type: 'error',
+        message: `Jednorazowo można zaimportować maksymalnie ${MAX_SUPERVISION_BATCH_FILES} plików paczek nadzoru (wybrano ${fileArray.length}). Podziel pliki na mniejsze partie.`,
+      });
+      return;
+    }
+
+    const totalBatchBytes = fileArray.reduce(
+      (sum, f) => sum + (Number.isFinite(f.size) && f.size > 0 ? f.size : 0),
+      0
+    );
+    if (totalBatchBytes > MAX_SUPERVISION_BATCH_TOTAL_BYTES) {
+      setSupervisionFeedback({
+        type: 'error',
+        message: `Łączny rozmiar wybranej partii (${formatFileSizeMiB(totalBatchBytes)}) przekracza limit ${Math.round(MAX_SUPERVISION_BATCH_TOTAL_BYTES / (1024 * 1024))} MiB. Importuj pliki mniejszymi grupami.`,
+      });
+      return;
+    }
+
+    const parsedItems: Array<
+      | { fileName: string; ok: true; pkg: TeacherSupervisionPackage }
+      | { fileName: string; ok: false; error: string }
+    > = [];
+
+    for (const file of fileArray) {
+      try {
+        const precheck = validateImportFileMetadata(file, { allowZip: false });
+        if (!precheck.ok) {
+          parsedItems.push({
+            fileName: file.name,
+            ok: false,
+            error: precheck.error,
+          });
+          continue;
+        }
+        const text = await file.text();
+        const parsed = validateAndParseSupervisionPackageJson(text);
+        if (parsed.ok) {
+          parsedItems.push({
+            fileName: file.name,
+            ok: true,
+            pkg: parsed.pkg,
+          });
+        } else {
+          parsedItems.push({
+            fileName: file.name,
+            ok: false,
+            error: parsed.error,
+          });
+        }
+      } catch {
+        parsedItems.push({
+          fileName: file.name,
+          ok: false,
+          error: 'Nie udało się odczytać pliku.',
+        });
+      }
+    }
+
+    const workingForCheck = [...stateRef.current.supervisionPackages];
+    const collisions: Array<{
+      incoming: TeacherSupervisionPackage;
+      existing: TeacherSupervisionPackage;
+    }> = [];
+
+    for (const item of parsedItems) {
+      if (!item.ok) continue;
+      const incoming = item.pkg;
+      const exactMatch = workingForCheck.some((p) => p.teacherKey === incoming.teacherKey);
+      if (!exactMatch) {
+        const nameIdx = findNameOnlySupervisionMatchIndex(workingForCheck, incoming);
+        if (nameIdx !== -1 && workingForCheck[nameIdx]) {
+          collisions.push({ incoming, existing: workingForCheck[nameIdx]! });
+        } else {
+          workingForCheck.push(incoming);
+        }
+      }
+    }
+
+    if (collisions.length > 0) {
+      setPendingSupervisionBatch({
+        parsedItems,
+        collisions,
+        decisions: {},
+      });
+      return;
+    }
+
+    finalizeSupervisionBatch(parsedItems, {});
+  };
+
+  const handleResolveSupervisionNameCollision = (choice: NameCollisionResolution) => {
+    if (!pendingSupervisionBatch) return;
+    const answeredCount = Object.keys(pendingSupervisionBatch.decisions).length;
+    const currentCollision = pendingSupervisionBatch.collisions[answeredCount];
+    if (!currentCollision) return;
+
+    const nextDecisions: Record<string, NameCollisionResolution> = {
+      ...pendingSupervisionBatch.decisions,
+      [currentCollision.incoming.id]: choice,
+    };
+
+    if (answeredCount + 1 >= pendingSupervisionBatch.collisions.length) {
+      const { parsedItems } = pendingSupervisionBatch;
+      setPendingSupervisionBatch(null);
+      finalizeSupervisionBatch(parsedItems, nextDecisions);
+    } else {
+      setPendingSupervisionBatch({
+        ...pendingSupervisionBatch,
+        decisions: nextDecisions,
       });
     }
   };
@@ -1197,10 +1269,23 @@ export default function App() {
       });
 
       if (result.ok) {
-        setPdfNotice({
-          type: 'success',
-          message: `Pobrano plik PDF „${result.filename}” (${result.pageCount} ${result.pageCount === 1 ? 'strona A4' : 'stron A4'}).`,
-        });
+        if (result.skipped && result.skipped.length > 0) {
+          const skippedCount = result.skipped.length;
+          const previewTitles = result.skipped
+            .slice(0, 3)
+            .map((s) => s.title)
+            .join(', ');
+          const ellipsis = skippedCount > 3 ? '…' : '';
+          setPdfNotice({
+            type: 'warning',
+            message: `Pominięto ${skippedCount} z ${sheets.length} kart podczas generowania PDF (${previewTitles}${ellipsis}) — zapisano ${result.pageCount} ${result.pageCount === 1 ? 'stronę A4' : 'stron A4'} w pliku „${result.filename}”.`,
+          });
+        } else {
+          setPdfNotice({
+            type: 'success',
+            message: `Pobrano plik PDF „${result.filename}” (${result.pageCount} ${result.pageCount === 1 ? 'strona A4' : 'stron A4'}).`,
+          });
+        }
       } else {
         setPdfNotice({
           type: 'error',
@@ -1355,13 +1440,17 @@ export default function App() {
           className={`no-print border-b px-4 md:px-6 py-2.5 text-xs ${
             pdfNotice.type === 'error'
               ? 'border-red-300 bg-red-50 text-red-950'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-950'
+              : pdfNotice.type === 'warning'
+                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-950'
           }`}
         >
           <div className="mx-auto max-w-[1440px] flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 font-medium">
               {pdfNotice.type === 'error' ? (
                 <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              ) : pdfNotice.type === 'warning' ? (
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
               ) : (
                 <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
               )}
@@ -1638,9 +1727,9 @@ export default function App() {
           <BackupJsonView
             state={state}
             lastBackupExportAt={backupReminderMeta.lastBackupExportAt}
-            onImportState={(nextState) => {
+            onImportState={(nextState, warnings) => {
               setBackupDownloadFirst(true);
-              setConfirmDialog({ kind: 'import_backup', nextState });
+              setConfirmDialog({ kind: 'import_backup', nextState, warnings });
             }}
             onRequestFullReset={() => setConfirmDialog({ kind: 'reset_all' })}
             onOpenShareModal={(mode) => setSharePhrasesModalMode(mode)}
@@ -2236,6 +2325,18 @@ export default function App() {
               </p>
             </div>
 
+            {confirmDialog.warnings && confirmDialog.warnings.length > 0 && (
+              <div
+                role="status"
+                className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 space-y-1"
+              >
+                <p className="font-semibold">Uwaga podczas odczytu pliku:</p>
+                {confirmDialog.warnings.map((w, idx) => (
+                  <p key={idx}>· {w}</p>
+                ))}
+              </div>
+            )}
+
             <label className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-slate-800 cursor-pointer">
               <input
                 type="checkbox"
@@ -2258,6 +2359,77 @@ export default function App() {
           </div>
         )}
       </ConfirmModal>
+
+      {pendingSupervisionBatch && (() => {
+        const answeredCount = Object.keys(pendingSupervisionBatch.decisions).length;
+        const currentCollision = pendingSupervisionBatch.collisions[answeredCount];
+        if (!currentCollision) return null;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="supervision-collision-title"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 no-print"
+          >
+            <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <h2
+                    id="supervision-collision-title"
+                    className="text-base font-bold text-slate-900"
+                  >
+                    Wykryto zbieżność nazwiska nauczyciela ({answeredCount + 1} z{' '}
+                    {pendingSupervisionBatch.collisions.length})
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                    Importowana paczka należy do nauczyciela o imieniu i nazwisku{' '}
+                    <strong className="text-slate-900">
+                      {resolvePackageTeacherName(currentCollision.incoming)}
+                    </strong>
+                    , ale ma inny identyfikator profilu (<code>teacherKey</code>) niż istniejąca paczka w nadzorze. Zdecyduj, czy scalić ją jako aktualizację, czy zachować jako osobnego nauczyciela.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+                <p>
+                  Istniejąca paczka: <strong>{resolvePackageTeacherName(currentCollision.existing)}</strong>{' '}
+                  ({currentCollision.existing.documents.length} dok.)
+                </p>
+                <p>
+                  Nowa paczka: <strong>{resolvePackageTeacherName(currentCollision.incoming)}</strong>{' '}
+                  ({currentCollision.incoming.documents.length} dok.)
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingSupervisionBatch(null)}
+                  className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  Anuluj import partii
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleResolveSupervisionNameCollision('new_teacher')}
+                  className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 cursor-pointer"
+                >
+                  Dodaj jako nowego nauczyciela
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleResolveSupervisionNameCollision('same_teacher')}
+                  className="rounded-lg bg-blue-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-800 cursor-pointer"
+                >
+                  To ten sam nauczyciel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <OfflineIndicator />
       </div>

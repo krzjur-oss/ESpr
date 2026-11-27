@@ -67,8 +67,18 @@ export class ErrorBoundary extends React.Component<
   };
 
   handleConfirmReset = async () => {
-    await wipeDatabaseForRecovery();
-    window.location.reload();
+    const res = await wipeDatabaseForRecovery();
+    if (res.ok) {
+      window.location.reload();
+      return;
+    }
+    this.setState({
+      confirmReset: false,
+      recoveryFeedback: {
+        type: 'error',
+        message: res.error,
+      },
+    });
   };
 
   render() {

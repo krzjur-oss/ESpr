@@ -236,5 +236,39 @@ Wersja aplikacji została podniesiona z `1.8.0` na `1.8.1` (`package.json`, `pac
 - `npm run lint` (`tsc --noEmit`): kod `0` (0 błędów).
 - `npm test` (`vitest run`): kod `0` (**5 plików, 47/47 testów zaliczonych**).
 - `npm run build` (`vite build`): kod `0` (`dist/sw.js`, precache `69 entries`, `2909.67 KiB`).
-- Testy manualne w przeglądarce oraz konfiguracja nagłówków bezpieczeństwa na docelowym hostingu: **NIEWYKONANE — wymaga weryfikacji poza środowiskiem** (szczegóły w `RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md`).
+- Testy manualne w przeglądarce oraz konfiguracja nagłówków bezpieczeństwa na docelowym hostingu: **NIEWYKONANE — wymaga weryfikacji poza środowiskiem** (szczegły w `RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md`).
+
+---
+
+# Aktualizacja naprawcza — wersja 1.8.2 (listopad 2026)
+
+Wersja aplikacji została podniesiona z `1.8.1` na **`1.8.2`** (`package.json`, `package-lock.json`, `src/data/changelog.ts`, `CHANGELOG.md`, `README.md`, `REGULAMIN.md`, `LICENSE.md`) zgodnie z ustaleniami `F-01`–`F-14` oraz `I-01`–`I-04`.
+
+## 1. Status ustaleń (F-01 … F-14, I-01 … I-04)
+
+- **F-01 (Naprawione):** Wprowadzono niezależną stałą `LEGAL_DOCUMENTS_VERSION = '1.8.1'` (`MIN_REQUIRED_TERMS_VERSION = LEGAL_DOCUMENTS_VERSION`), usunięto podstawianie `APP_VERSION` w `sanitizeTermsAcceptanceRecord`, dodano porównywanie rekordów IDB vs `localStorage` (`selectLatestTermsAcceptanceRecord`) oraz ujednolicono regułę w `loadAppState()` (w tym dla istniejących baz bez rekordu zgody i gałęzi `catch`).
+- **F-02 (Naprawione):** Dodano `evaluateBackupExportSize` w `src/utils/importLimits.ts`, podgląd szacowanego rozmiaru JSON i `.zip` oraz wybór zakresu roku szkolnego (`all` lub konkretny rok + opcjonalne pominięcie baz dodatkowych) w `src/components/BackupJsonView.tsx`, komunikaty o przekroczeniu `25 MiB` (oraz ostrzeżenie >= 80% limitu) bez blokowania eksportu, a także poprawiono `OVERSIZED_BACKUP_RECOVERY_HINT` na działania dostępne w aplikacji. Limit importu pozostawiono na poziomie `25 MiB` ze względu na bezpieczeństwo pamięciowe na urządzeniach mobilnych.
+- **F-03 (Naprawione):** `exportElementsToPdf` w `src/utils/pdfExport.ts` rejestruje pominięte puste płótna (`0×0`) na liście `skipped` (w UI `src/App.tsx` wyświetlane jako ostrzeżenie, a przy pominięciu wszystkich arkuszy jako błąd), wprowadza adaptacyjne skalowanie bardzo wysokich arkuszy (`MAX_CANVAS_DIMENSION_PX = 16_384`, `MAX_CANVAS_AREA_PX = 16_000_000`, `1 <= scale <= 2`) oraz dopisano w `AboutView.tsx` informację o obrazowym charakterze PDF względem tekstowego druku systemowego („Drukuj”).
+- **F-04 (Naprawione):** Przeniesiono pliki sesyjne AI Studio z `public/assets/aistudio/` do `docs/aistudio/` i usunięto pusty katalog `public/assets/` (`dist/` nie zawiera tych plików).
+- **F-05 (Naprawione):** Utworzono `public/THIRD_PARTY_NOTICES.txt` z dosłowną treścią licencji ze wszystkich 15 produkcyjnych i fontowych paczek w `node_modules/*/LICENSE` (w tym `react`, `react-dom`, `fflate`, `html2canvas-pro@2.5.0`, `jspdf@4.2.1`, `lucide-react`, `@fontsource/*`), dołączono go do `includeAssets` w `vite.config.ts` i podlinkowano w `AboutView.tsx`, `LegalDocumentsContent.tsx` oraz `LICENSE.md`.
+- **F-06 (Naprawione):** Dodano w `index.html` politykę CSP w `<meta http-equiv="Content-Security-Policy">`, tagi `og:image`/`twitter:image` (`./pwa-512x512.png`) oraz komunikat `<noscript>` po polsku.
+- **F-07 (Naprawione):** Przypięto `"html2canvas-pro": "2.5.0"` (zgodne z Node 22 — wyeliminowano `EBADENGINE` przy `npm ci` na Node `v22.23.5`), dodano `"engines": { "node": ">=22.0.0" }` w `package.json` oraz krok `npm audit --omit=dev --audit-level=high` w `.github/workflows/deploy.yml`. Akcje GitHub pozostawiono na tagach głównych (`@v4`/`@v5`/`@v3`) — ewentualne przypięcie do SHA pozostawiono do decyzji wydawcy.
+- **F-08 (Naprawione):** Wyeliminowano `EBADENGINE` dla Node 22 dzięki przypięciu `html2canvas-pro@2.5.0`.
+- **F-09 (Naprawione):** W `src/utils/storage.ts` rozdzielono `try/catch` dla `JSON.parse` i przetwarzania danych (logowanie szczegółów wyłącznie przy `import.meta.env.DEV`), utrzymano kompatybilność wsteczną ze starszymi kopiami bez pola `app`, odrzucono wersje `> MAX_SUPPORTED_BACKUP_VERSION` (`1`) oraz dodano zliczanie i prezentację ostrzeżeń o obcięciu pól (`> 100 000` znaków) w oknie potwierdzenia importu i w `SharePhrasesModal.tsx`.
+- **F-10 (Naprawione):** W `src/utils/supervision.ts` i `src/App.tsx` ograniczono partię paczek nadzoru (`MAX_SUPERVISION_BATCH_FILES = 50`, `MAX_SUPERVISION_BATCH_TOTAL_BYTES = 50 MiB`), zastosowano sekwencyjne wczytywanie plików, jednokrotne scalenie partii (`mergeSupervisionBatch`) ze wspólnym znacznikiem `batchImportedAt` oraz interaktywne okno wyboru użytkownika przy kolizji samego imienia i nazwiska (różny `teacherKey`).
+- **F-11 (Naprawione):** Poprawiono warunek szybkiej ścieżki w `saveAppStateImmediate`, zaktualizowano `wipeDatabaseForRecovery()` tak, aby wykrywała `onblocked` bez kasowania `localStorage` i zachowywała `TERMS_ACCEPTANCE_LS_KEY` przy sukcesie (obsługa w `ErrorBoundary.tsx`), oraz zmieniono konfigurację SW na `registerType: 'prompt'` z wywołaniem `flushPendingAppStateSave()` i `waitForPendingAppStateSave()` przed aktualizacją.
+- **F-12 (Naprawione):** W `src/utils/zipBackup.ts` zwiększono bufor strumienia do `65536 B`, zastąpiono `setTimeout(0)` przez `MessageChannel` (z fallbackiem `setTimeout`), zaktualizowano komunikat przy nieobsługiwanej metodzie kompresji oraz dodano test czasowy rozpakowywania ~20 MiB archiwum ZIP.
+- **F-13 (Naprawione):** Usunięto robocze adnotacje o dacie wejścia w życie z `REGULAMIN.md`, `LICENSE.md` oraz `LegalDocumentsContent.tsx`, zastępując je neutralnym komunikatem „do uzupełnienia przez wydawcę”, oraz rozdzielono wersję dokumentów prawnych (`1.8.1`) od wersji aplikacji (`1.8.2`).
+- **F-14 (Naprawione):** Usunięto zduplikowany `bun.lock` (zachowano `package-lock.json`), uporządkowano `devDependencies` w `package.json`, zmieniono skrypt `clean` na wieloplatformowe polecenie Node.js (`fs.rmSync`), zaktualizowano dokumentację wersji oraz dopisano korektę do `RAPORT_AUDYTU_E-SPRAWOZDANIA_1.8.0.md`.
+- **I-01 … I-04 (Naprawione):** Usunięto nieużywaną wtyczkę `copy-unbundled-src-assets` z `vite.config.ts` (brak `src/assets`), oczyszczono `tsconfig.json` ze zbędnych opcji, zweryfikowano `metadata.json` i zaktualizowano `Changelog` / `README.md`.
+
+## 2. Zweryfikowane wyniki uruchomień (1.8.2)
+
+- `npm ci --no-audit --no-fund`: kod `0`, `0` ostrzeżeń `EBADENGINE` na Node `v22.23.5`.
+- `npm run lint` (`tsc --noEmit`): kod `0`, `0` błędów typowania.
+- `npm test` (`vitest run`): kod `0`, **5 plików testowych, 58/58 testów zaliczonych** (wszystkie 47 dotychczasowych + 11 nowych testów dla F-01, F-02, F-03, F-09, F-10, F-11, F-12).
+- `npm run clean && npm run build`: kod `0`, wygenerowano `dist/sw.js` (`precache 70 entries`), w `dist/` obecny `THIRD_PARTY_NOTICES.txt` i brak `assets/aistudio/`.
+- `npm audit --omit=dev`: kod `0`, `found 0 vulnerabilities`.
+- Testy manualne w przeglądarce (Chrome / Edge / Android): **NIEWYKONANE – wymaga przeglądarki**.
+
 

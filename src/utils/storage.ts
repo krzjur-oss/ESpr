@@ -37,16 +37,22 @@ import {
   createId,
   createInitialAppState,
 } from './documentFactory';
-import { APP_VERSION } from '../data/changelog';
-import { triggerJsonDownload } from './download';
-import { MAX_IMPORT_FILE_MIB, MAX_IMPORT_JSON_CHARS } from './importLimits';
+import { triggerBlobDownload, triggerJsonDownload } from './download';
+import {
+  BackupSizeEvaluation,
+  MAX_IMPORT_FILE_MIB,
+  MAX_IMPORT_JSON_CHARS,
+  evaluateBackupExportSize,
+} from './importLimits';
 import { buildTeacherKey } from './supervision';
 
 export { MAX_IMPORT_FILE_BYTES, MAX_IMPORT_FILE_MIB, MAX_IMPORT_JSON_CHARS } from './importLimits';
 
 export const LEGACY_STORAGE_KEY = 'esprawozdania_local_state_v1';
 export const TERMS_ACCEPTANCE_LS_KEY = 'esprawozdania_terms_accepted_v1';
-export const MIN_REQUIRED_TERMS_VERSION = '1.8.0';
+export const LEGAL_DOCUMENTS_VERSION = '1.8.1';
+export const MIN_REQUIRED_TERMS_VERSION = LEGAL_DOCUMENTS_VERSION;
+export const MAX_SUPPORTED_BACKUP_VERSION = 1;
 export const BACKUP_REMINDER_LS_KEY = 'esprawozdania_backup_meta_v1';
 export const BACKUP_REMINDER_INTERVAL_DAYS = 14;
 export const BACKUP_REMINDER_SNOOZE_DAYS = 7;
@@ -63,6 +69,48 @@ const BROADCAST_CHANNEL_NAME = 'esprawozdania';
 const MAX_TEXT_LENGTH = 100_000;
 const MAX_SHORT_LENGTH = 500;
 const FORBIDDEN_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+export interface SanitizeStats {
+  truncatedLongTextCount: number;
+  truncatedShortTextCount: number;
+  droppedArrayItemsCount: number;
+}
+
+function createSanitizeStats(): SanitizeStats {
+  return {
+    truncatedLongTextCount: 0,
+    truncatedShortTextCount: 0,
+    droppedArrayItemsCount: 0,
+  };
+}
+
+function summarizeSanitizeWarnings(stats: SanitizeStats): {
+  warnings: string[];
+  truncatedFieldsCount: number;
+  droppedItemsCount: number;
+} {
+  const warnings: string[] = [];
+  if (stats.truncatedLongTextCount > 0) {
+    warnings.push(
+      `Obcięto ${stats.truncatedLongTextCount} pól dłuższych niż 100 000 znaków.`
+    );
+  }
+  if (stats.truncatedShortTextCount > 0) {
+    warnings.push(
+      `Obcięto ${stats.truncatedShortTextCount} krótkich pól przekraczających dopuszczalny limit znaków.`
+    );
+  }
+  if (stats.droppedArrayItemsCount > 0) {
+    warnings.push(
+      `Pominięto ${stats.droppedArrayItemsCount} nieprawidłowych lub zbyt długich elementów list.`
+    );
+  }
+  return {
+    warnings,
+    truncatedFieldsCount: stats.truncatedLongTextCount + stats.truncatedShortTextCount,
+    droppedItemsCount: stats.droppedArrayItemsCount,
+  };
+}
 
 const VALID_WNIOSEK_CATEGORY_IDS = new Set<string>(
   WNIOSKI_CATEGORY_OPTIONS.map((opt) => opt.id)
@@ -87,9 +135,24 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
   return !!val && typeof val === 'object' && !Array.isArray(val);
 }
 
-function asStr(val: unknown, fallback: string, maxLen = MAX_TEXT_LENGTH): string {
+function asStr(
+  val: unknown,
+  fallback: string,
+  maxLen = MAX_TEXT_LENGTH,
+  stats?: SanitizeStats
+): string {
   if (typeof val !== 'string') return fallback;
-  return val.length > maxLen ? val.slice(0, maxLen) : val;
+  if (val.length > maxLen) {
+    if (stats) {
+      if (maxLen >= MAX_TEXT_LENGTH) {
+        stats.truncatedLongTextCount += 1;
+      } else {
+        stats.truncatedShortTextCount += 1;
+      }
+    }
+    return val.slice(0, maxLen);
+  }
+  return val;
 }
 
 function asBool(val: unknown, fallback: boolean): boolean {
@@ -113,12 +176,25 @@ function asClassificationPeriod(
   return val === 'srodroczne' || val === 'roczne' ? val : fallback;
 }
 
-function asStringArray<T extends string>(val: unknown, fallback: T[]): T[] {
+function asStringArray<T extends string>(
+  val: unknown,
+  fallback: T[],
+  stats?: SanitizeStats
+): T[] {
   if (!Array.isArray(val)) return fallback;
-  return val.filter(
-    (item): item is T =>
-      typeof item === 'string' && item.trim().length > 0 && item.length <= MAX_SHORT_LENGTH
-  );
+  const result: T[] = [];
+  for (const item of val) {
+    if (
+      typeof item === 'string' &&
+      item.trim().length > 0 &&
+      item.length <= MAX_SHORT_LENGTH
+    ) {
+      result.push(item as T);
+    } else if (stats) {
+      stats.droppedArrayItemsCount += 1;
+    }
+  }
+  return result;
 }
 
 function sanitizeIsoDate(val: unknown, fallback: string): string {
@@ -164,7 +240,10 @@ function findDuplicateExplicitId(
   return null;
 }
 
-export function sanitizeCustomWnioski(raw: unknown): CustomWniosekEntry[] {
+export function sanitizeCustomWnioski(
+  raw: unknown,
+  stats?: SanitizeStats
+): CustomWniosekEntry[] {
   if (!Array.isArray(raw)) return [];
   const seenIds = new Set<string>();
   const nowFallback = new Date().toISOString();
@@ -186,19 +265,27 @@ export function sanitizeCustomWnioski(raw: unknown): CustomWniosekEntry[] {
       }
       seenIds.add(id);
 
+      const trimmedText = item.text.trim();
+      if (stats && trimmedText.length > MAX_TEXT_LENGTH) {
+        stats.truncatedLongTextCount += 1;
+      }
+
       return {
         id,
         categoryId:
           typeof item.categoryId === 'string' && VALID_WNIOSEK_CATEGORY_IDS.has(item.categoryId)
             ? item.categoryId
             : CUSTOM_WNIOSKI_CATEGORY_ID,
-        text: item.text.trim().slice(0, MAX_TEXT_LENGTH),
+        text: trimmedText.slice(0, MAX_TEXT_LENGTH),
         createdAt: sanitizeIsoDate(item.createdAt, nowFallback),
       };
     });
 }
 
-export function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
+export function sanitizeCustomTemplates(
+  raw: unknown,
+  stats?: SanitizeStats
+): CustomTemplateEntry[] {
   if (!Array.isArray(raw)) return [];
   const seenIds = new Set<string>();
   const nowFallback = new Date().toISOString();
@@ -220,23 +307,36 @@ export function sanitizeCustomTemplates(raw: unknown): CustomTemplateEntry[] {
       }
       seenIds.add(id);
 
+      const trimmedContent = item.content.trim();
+      if (stats && trimmedContent.length > MAX_TEXT_LENGTH) {
+        stats.truncatedLongTextCount += 1;
+      }
+      const trimmedTitle =
+        typeof item.title === 'string' ? item.title.trim() : '';
+      if (stats && trimmedTitle.length > MAX_SHORT_LENGTH) {
+        stats.truncatedShortTextCount += 1;
+      }
+
       return {
         id,
-        title:
-          typeof item.title === 'string' && item.title.trim()
-            ? item.title.trim().slice(0, MAX_SHORT_LENGTH)
-            : 'Szablon własny',
+        title: trimmedTitle
+          ? trimmedTitle.slice(0, MAX_SHORT_LENGTH)
+          : 'Szablon własny',
         category:
           typeof item.category === 'string' && VALID_TEMPLATE_CATEGORIES.has(item.category)
             ? (item.category as TemplateSectionCategory)
             : 'ogolne',
-        content: item.content.trim().slice(0, MAX_TEXT_LENGTH),
+        content: trimmedContent.slice(0, MAX_TEXT_LENGTH),
         createdAt: sanitizeIsoDate(item.createdAt, nowFallback),
       };
     });
 }
 
-function sanitizeZbiorczeRows(raw: unknown, fallback: ZbiorczeRow[]): ZbiorczeRow[] {
+function sanitizeZbiorczeRows(
+  raw: unknown,
+  fallback: ZbiorczeRow[],
+  stats?: SanitizeStats
+): ZbiorczeRow[] {
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
   return raw
@@ -250,20 +350,21 @@ function sanitizeZbiorczeRows(raw: unknown, fallback: ZbiorczeRow[]): ZbiorczeRo
       seenIds.add(id);
       return {
         id,
-        className: asStr(item.className, '', MAX_SHORT_LENGTH),
-        teacherName: asStr(item.teacherName, '', MAX_SHORT_LENGTH),
+        className: asStr(item.className, '', MAX_SHORT_LENGTH, stats),
+        teacherName: asStr(item.teacherName, '', MAX_SHORT_LENGTH, stats),
         curriculumStatus: asCurriculumStatus(item.curriculumStatus, 'na_biezaco'),
-        curriculumDetails: asStr(item.curriculumDetails, ''),
-        failingCount: asStr(item.failingCount, '0', 32),
-        excellentCount: asStr(item.excellentCount, '0', 32),
-        notes: asStr(item.notes, ''),
+        curriculumDetails: asStr(item.curriculumDetails, '', MAX_TEXT_LENGTH, stats),
+        failingCount: asStr(item.failingCount, '0', 32, stats),
+        excellentCount: asStr(item.excellentCount, '0', 32, stats),
+        notes: asStr(item.notes, '', MAX_TEXT_LENGTH, stats),
       };
     });
 }
 
 function sanitizeSubjectHoursRows(
   raw: unknown,
-  fallback: SubjectHoursRow[]
+  fallback: SubjectHoursRow[],
+  stats?: SanitizeStats
 ): SubjectHoursRow[] {
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
@@ -278,15 +379,16 @@ function sanitizeSubjectHoursRows(
       seenIds.add(id);
       return {
         id,
-        subject: asStr(item.subject, '', MAX_SHORT_LENGTH),
-        hours: asStr(item.hours, '', 64),
+        subject: asStr(item.subject, '', MAX_SHORT_LENGTH, stats),
+        hours: asStr(item.hours, '', 64, stats),
       };
     });
 }
 
 function sanitizeAdditionalTaskRows(
   raw: unknown,
-  fallback: AdditionalTaskRow[]
+  fallback: AdditionalTaskRow[],
+  stats?: SanitizeStats
 ): AdditionalTaskRow[] {
   if (!Array.isArray(raw)) return fallback;
   const seenIds = new Set<string>();
@@ -301,9 +403,9 @@ function sanitizeAdditionalTaskRows(
       seenIds.add(id);
       return {
         id,
-        taskType: asStr(item.taskType, ''),
-        results: asStr(item.results, ''),
-        conclusions: asStr(item.conclusions, ''),
+        taskType: asStr(item.taskType, '', MAX_TEXT_LENGTH, stats),
+        results: asStr(item.results, '', MAX_TEXT_LENGTH, stats),
+        conclusions: asStr(item.conclusions, '', MAX_TEXT_LENGTH, stats),
       };
     });
 }
@@ -311,12 +413,18 @@ function sanitizeAdditionalTaskRows(
 function sanitizeSingleDocument(
   raw: unknown,
   fallbackProfile: TeacherProfile,
-  seenIds: Set<string>
+  seenIds: Set<string>,
+  stats?: SanitizeStats
 ): ReportDocument | null {
   if (!isPlainObject(raw)) return null;
   if (typeof raw.type !== 'string' || !VALID_DOC_TYPES.has(raw.type)) {
     return null;
   }
+
+  const str = (val: unknown, fallback: string, maxLen = MAX_TEXT_LENGTH) =>
+    asStr(val, fallback, maxLen, stats);
+  const strArr = <T extends string>(val: unknown, fallback: T[]) =>
+    asStringArray<T>(val, fallback, stats);
 
   const docType = raw.type as DocumentType;
   let id =
@@ -348,12 +456,12 @@ function sanitizeSingleDocument(
 
   const common = {
     id,
-    title: asStr(raw.title, base.title, MAX_SHORT_LENGTH),
+    title: str(raw.title, base.title, MAX_SHORT_LENGTH),
     createdAt: sanitizeIsoDate(raw.createdAt, base.createdAt),
     updatedAt: sanitizeIsoDate(raw.updatedAt, base.updatedAt),
-    schoolName: asStr(raw.schoolName, base.schoolName, MAX_SHORT_LENGTH),
-    schoolYear: asStr(raw.schoolYear, base.schoolYear, 64),
-    signatureDate: asStr(raw.signatureDate, base.signatureDate, 64),
+    schoolName: str(raw.schoolName, base.schoolName, MAX_SHORT_LENGTH),
+    schoolYear: str(raw.schoolYear, base.schoolYear, 64),
+    signatureDate: str(raw.signatureDate, base.signatureDate, 64),
     isLocked: asBool(raw.isLocked, false),
   };
 
@@ -365,32 +473,32 @@ function sanitizeSingleDocument(
         ...common,
         type: 'efekty_nauczania',
         semester: asSemester(raw.semester, def.semester),
-        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
-        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
-        programNumber: asStr(raw.programNumber, def.programNumber, MAX_SHORT_LENGTH),
-        textbookNumber: asStr(raw.textbookNumber, def.textbookNumber, MAX_SHORT_LENGTH),
-        textbookTitle: asStr(raw.textbookTitle, def.textbookTitle, MAX_SHORT_LENGTH),
-        className: asStr(raw.className, def.className, 64),
+        teacherName: str(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        subject: str(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        programNumber: str(raw.programNumber, def.programNumber, MAX_SHORT_LENGTH),
+        textbookNumber: str(raw.textbookNumber, def.textbookNumber, MAX_SHORT_LENGTH),
+        textbookTitle: str(raw.textbookTitle, def.textbookTitle, MAX_SHORT_LENGTH),
+        className: str(raw.className, def.className, 64),
         curriculumStatus: asCurriculumStatus(raw.curriculumStatus, def.curriculumStatus),
-        curriculumScope: asStr(raw.curriculumScope, def.curriculumScope),
-        curriculumNotes: asStr(raw.curriculumNotes, def.curriculumNotes),
-        failingGradesCount: asStr(raw.failingGradesCount, def.failingGradesCount, 32),
-        excellentGradesCount: asStr(raw.excellentGradesCount, def.excellentGradesCount, 32),
-        gradesNotes: asStr(raw.gradesNotes, def.gradesNotes),
+        curriculumScope: str(raw.curriculumScope, def.curriculumScope),
+        curriculumNotes: str(raw.curriculumNotes, def.curriculumNotes),
+        failingGradesCount: str(raw.failingGradesCount, def.failingGradesCount, 32),
+        excellentGradesCount: str(raw.excellentGradesCount, def.excellentGradesCount, 32),
+        gradesNotes: str(raw.gradesNotes, def.gradesNotes),
         individualPathNotApplicable: asBool(
           raw.individualPathNotApplicable,
           def.individualPathNotApplicable
         ),
-        individualPathSummary: asStr(raw.individualPathSummary, def.individualPathSummary),
+        individualPathSummary: str(raw.individualPathSummary, def.individualPathSummary),
         competitionsNone: asBool(raw.competitionsNone, def.competitionsNone),
-        competitionsDetails: asStr(raw.competitionsDetails, def.competitionsDetails),
-        educationalTrips: asStr(raw.educationalTrips, def.educationalTrips),
-        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
-        previousConclusionsStatus: asStr(
+        competitionsDetails: str(raw.competitionsDetails, def.competitionsDetails),
+        educationalTrips: str(raw.educationalTrips, def.educationalTrips),
+        preventiveProgram: str(raw.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: str(
           raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
+        futureConclusions: str(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'zbiorcze_efekty': {
@@ -400,20 +508,20 @@ function sanitizeSingleDocument(
         ...common,
         type: 'zbiorcze_efekty',
         semester: asSemester(raw.semester, def.semester),
-        coordinatorName: asStr(raw.coordinatorName, def.coordinatorName, MAX_SHORT_LENGTH),
-        subjectOrStage: asStr(raw.subjectOrStage, def.subjectOrStage, MAX_SHORT_LENGTH),
+        coordinatorName: str(raw.coordinatorName, def.coordinatorName, MAX_SHORT_LENGTH),
+        subjectOrStage: str(raw.subjectOrStage, def.subjectOrStage, MAX_SHORT_LENGTH),
         mode: coordinatorMode,
-        rows: sanitizeZbiorczeRows(raw.rows, def.rows),
-        earlyEdWeakAreas: asStr(raw.earlyEdWeakAreas, def.earlyEdWeakAreas),
-        earlyEdStrongAreas: asStr(raw.earlyEdStrongAreas, def.earlyEdStrongAreas),
-        achievements: asStr(raw.achievements, def.achievements),
-        educationalTrips: asStr(raw.educationalTrips, def.educationalTrips),
-        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
-        previousConclusionsStatus: asStr(
+        rows: sanitizeZbiorczeRows(raw.rows, def.rows, stats),
+        earlyEdWeakAreas: str(raw.earlyEdWeakAreas, def.earlyEdWeakAreas),
+        earlyEdStrongAreas: str(raw.earlyEdStrongAreas, def.earlyEdStrongAreas),
+        achievements: str(raw.achievements, def.achievements),
+        educationalTrips: str(raw.educationalTrips, def.educationalTrips),
+        preventiveProgram: str(raw.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: str(
           raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
+        futureConclusions: str(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'karta_informacyjna': {
@@ -422,28 +530,29 @@ function sanitizeSingleDocument(
         ...def,
         ...common,
         type: 'karta_informacyjna',
-        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
-        period: asStr(raw.period, def.period, MAX_SHORT_LENGTH),
-        totalHours: asStr(raw.totalHours, def.totalHours, 64),
-        homeroomClass: asStr(raw.homeroomClass, def.homeroomClass, 64),
-        subjectHours: sanitizeSubjectHoursRows(raw.subjectHours, def.subjectHours),
-        qualificationsStudies: asStr(raw.qualificationsStudies, def.qualificationsStudies),
-        qualificationsWorkshops: asStr(
+        teacherName: str(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        period: str(raw.period, def.period, MAX_SHORT_LENGTH),
+        totalHours: str(raw.totalHours, def.totalHours, 64),
+        homeroomClass: str(raw.homeroomClass, def.homeroomClass, 64),
+        subjectHours: sanitizeSubjectHoursRows(raw.subjectHours, def.subjectHours, stats),
+        qualificationsStudies: str(raw.qualificationsStudies, def.qualificationsStudies),
+        qualificationsWorkshops: str(
           raw.qualificationsWorkshops,
           def.qualificationsWorkshops
         ),
-        qualificationsMethodical: asStr(
+        qualificationsMethodical: str(
           raw.qualificationsMethodical,
           def.qualificationsMethodical
         ),
-        studentAchievements: asStr(raw.studentAchievements, def.studentAchievements),
-        tripsOrganization: asStr(raw.tripsOrganization, def.tripsOrganization),
-        didacticBaseEnrichment: asStr(raw.didacticBaseEnrichment, def.didacticBaseEnrichment),
-        statutoryActivities: asStr(raw.statutoryActivities, def.statutoryActivities),
-        directorTasks: sanitizeAdditionalTaskRows(raw.directorTasks, def.directorTasks),
+        studentAchievements: str(raw.studentAchievements, def.studentAchievements),
+        tripsOrganization: str(raw.tripsOrganization, def.tripsOrganization),
+        didacticBaseEnrichment: str(raw.didacticBaseEnrichment, def.didacticBaseEnrichment),
+        statutoryActivities: str(raw.statutoryActivities, def.statutoryActivities),
+        directorTasks: sanitizeAdditionalTaskRows(raw.directorTasks, def.directorTasks, stats),
         teacherInitiativeTasks: sanitizeAdditionalTaskRows(
           raw.teacherInitiativeTasks,
-          def.teacherInitiativeTasks
+          def.teacherInitiativeTasks,
+          stats
         ),
       };
     }
@@ -455,18 +564,18 @@ function sanitizeSingleDocument(
         type: 'podsumowanie_specjalisty',
         semester: asSemester(raw.semester, def.semester),
         role: specialistRole,
-        specialistName: asStr(raw.specialistName, def.specialistName, MAX_SHORT_LENGTH),
-        studentInfo: asStr(raw.studentInfo, def.studentInfo),
-        plannedTasks: asStr(raw.plannedTasks, def.plannedTasks),
-        tasksRealization: asStr(raw.tasksRealization, def.tasksRealization),
-        effects: asStr(raw.effects, def.effects),
-        conclusions: asStr(raw.conclusions, def.conclusions),
-        preventiveProgram: asStr(raw.preventiveProgram, def.preventiveProgram),
-        previousConclusionsStatus: asStr(
+        specialistName: str(raw.specialistName, def.specialistName, MAX_SHORT_LENGTH),
+        studentInfo: str(raw.studentInfo, def.studentInfo),
+        plannedTasks: str(raw.plannedTasks, def.plannedTasks),
+        tasksRealization: str(raw.tasksRealization, def.tasksRealization),
+        effects: str(raw.effects, def.effects),
+        conclusions: str(raw.conclusions, def.conclusions),
+        preventiveProgram: str(raw.preventiveProgram, def.preventiveProgram),
+        previousConclusionsStatus: str(
           raw.previousConclusionsStatus,
           def.previousConclusionsStatus
         ),
-        futureConclusions: asStr(raw.futureConclusions, def.futureConclusions),
+        futureConclusions: str(raw.futureConclusions, def.futureConclusions),
       };
     }
     case 'uzasadnienie_nieklasyfikowania': {
@@ -476,13 +585,13 @@ function sanitizeSingleDocument(
         ...common,
         type: 'uzasadnienie_nieklasyfikowania',
         classificationPeriod: classPeriod,
-        attachmentNumber: asStr(raw.attachmentNumber, def.attachmentNumber, 64),
-        studentName: asStr(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
-        className: asStr(raw.className, def.className, 64),
-        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
-        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
-        absencePercent: asStr(raw.absencePercent, def.absencePercent, 64),
-        additionalJustification: asStr(
+        attachmentNumber: str(raw.attachmentNumber, def.attachmentNumber, 64),
+        studentName: str(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
+        className: str(raw.className, def.className, 64),
+        subject: str(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        teacherName: str(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        absencePercent: str(raw.absencePercent, def.absencePercent, 64),
+        additionalJustification: str(
           raw.additionalJustification,
           def.additionalJustification
         ),
@@ -505,50 +614,50 @@ function sanitizeSingleDocument(
         ...common,
         type: 'uzasadnienie_ndst',
         classificationPeriod: classPeriod,
-        attachmentNumber: asStr(raw.attachmentNumber, def.attachmentNumber, 64),
-        studentName: asStr(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
-        className: asStr(raw.className, def.className, 64),
-        subject: asStr(raw.subject, def.subject, MAX_SHORT_LENGTH),
-        teacherName: asStr(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
-        educationStage: asStr(raw.educationStage, def.educationStage, MAX_SHORT_LENGTH),
-        curriculumGaps: asStr(raw.curriculumGaps, def.curriculumGaps),
-        observations: asStringArray<NdstObservationKey>(raw.observations, def.observations),
-        teacherActions: asStringArray<NdstTeacherActionKey>(
+        attachmentNumber: str(raw.attachmentNumber, def.attachmentNumber, 64),
+        studentName: str(raw.studentName, def.studentName, MAX_SHORT_LENGTH),
+        className: str(raw.className, def.className, 64),
+        subject: str(raw.subject, def.subject, MAX_SHORT_LENGTH),
+        teacherName: str(raw.teacherName, def.teacherName, MAX_SHORT_LENGTH),
+        educationStage: str(raw.educationStage, def.educationStage, MAX_SHORT_LENGTH),
+        curriculumGaps: str(raw.curriculumGaps, def.curriculumGaps),
+        observations: strArr<NdstObservationKey>(raw.observations, def.observations),
+        teacherActions: strArr<NdstTeacherActionKey>(
           raw.teacherActions,
           def.teacherActions
         ),
-        improvementScheduleWhen: asStr(
+        improvementScheduleWhen: str(
           raw.improvementScheduleWhen,
           def.improvementScheduleWhen
         ),
-        improvementScheduleForm: asStr(
+        improvementScheduleForm: str(
           raw.improvementScheduleForm,
           def.improvementScheduleForm
         ),
-        additionalTasksExamples: asStr(
+        additionalTasksExamples: str(
           raw.additionalTasksExamples,
           def.additionalTasksExamples
         ),
         additionalTasksCompleted: completed,
-        remedialClassesWhat: asStr(raw.remedialClassesWhat, def.remedialClassesWhat),
+        remedialClassesWhat: str(raw.remedialClassesWhat, def.remedialClassesWhat),
         remedialClassesAttended: attended,
-        remedialClassesNotAttendedReason: asStr(
+        remedialClassesNotAttendedReason: str(
           raw.remedialClassesNotAttendedReason,
           def.remedialClassesNotAttendedReason
         ),
-        parentsNotifiedDate: asStr(raw.parentsNotifiedDate, def.parentsNotifiedDate, 128),
-        parentsInstructedDate: asStr(raw.parentsInstructedDate, def.parentsInstructedDate, 128),
-        pedagogueNotifiedDate: asStr(raw.pedagogueNotifiedDate, def.pedagogueNotifiedDate, 128),
-        otherTeacherActionsText: asStr(
+        parentsNotifiedDate: str(raw.parentsNotifiedDate, def.parentsNotifiedDate, 128),
+        parentsInstructedDate: str(raw.parentsInstructedDate, def.parentsInstructedDate, 128),
+        pedagogueNotifiedDate: str(raw.pedagogueNotifiedDate, def.pedagogueNotifiedDate, 128),
+        otherTeacherActionsText: str(
           raw.otherTeacherActionsText,
           def.otherTeacherActionsText
         ),
-        parentsCooperation: asStr(raw.parentsCooperation, def.parentsCooperation),
-        nextSemesterActions: asStringArray<NdstNextSemesterActionKey>(
+        parentsCooperation: str(raw.parentsCooperation, def.parentsCooperation),
+        nextSemesterActions: strArr<NdstNextSemesterActionKey>(
           raw.nextSemesterActions,
           def.nextSemesterActions
         ),
-        nextSemesterOtherText: asStr(raw.nextSemesterOtherText, def.nextSemesterOtherText),
+        nextSemesterOtherText: str(raw.nextSemesterOtherText, def.nextSemesterOtherText),
       };
     }
   }
@@ -556,13 +665,14 @@ function sanitizeSingleDocument(
 
 export function sanitizeDocuments(
   docs: unknown,
-  fallbackProfile: TeacherProfile = createDefaultProfile()
+  fallbackProfile: TeacherProfile = createDefaultProfile(),
+  stats?: SanitizeStats
 ): ReportDocument[] {
   if (!Array.isArray(docs)) return [];
   const seenIds = new Set<string>();
   const result: ReportDocument[] = [];
   for (const rawDoc of docs) {
-    const sanitized = sanitizeSingleDocument(rawDoc, fallbackProfile, seenIds);
+    const sanitized = sanitizeSingleDocument(rawDoc, fallbackProfile, seenIds, stats);
     if (sanitized) {
       result.push(sanitized);
     }
@@ -570,7 +680,10 @@ export function sanitizeDocuments(
   return result;
 }
 
-export function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
+export function sanitizeProfile(
+  raw: Partial<TeacherProfile>,
+  stats?: SanitizeStats
+): TeacherProfile {
   const defaults = createDefaultProfile();
   const subjectsList = Array.isArray(raw.subjectsList)
     ? raw.subjectsList
@@ -607,14 +720,11 @@ export function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
 
         return {
           id,
-          subject: a.subject.slice(0, MAX_SHORT_LENGTH),
-          classScope: typeof a.classScope === 'string' ? a.classScope.slice(0, MAX_SHORT_LENGTH) : '',
-          programNumber:
-            typeof a.programNumber === 'string' ? a.programNumber.slice(0, MAX_SHORT_LENGTH) : '',
-          textbookNumber:
-            typeof a.textbookNumber === 'string' ? a.textbookNumber.slice(0, MAX_SHORT_LENGTH) : '',
-          textbookTitle:
-            typeof a.textbookTitle === 'string' ? a.textbookTitle.slice(0, MAX_SHORT_LENGTH) : '',
+          subject: asStr(a.subject, '', MAX_SHORT_LENGTH, stats),
+          classScope: asStr(a.classScope, '', MAX_SHORT_LENGTH, stats),
+          programNumber: asStr(a.programNumber, '', MAX_SHORT_LENGTH, stats),
+          textbookNumber: asStr(a.textbookNumber, '', MAX_SHORT_LENGTH, stats),
+          textbookTitle: asStr(a.textbookTitle, '', MAX_SHORT_LENGTH, stats),
         };
       });
   } else {
@@ -644,9 +754,9 @@ export function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
       typeof raw.senderId === 'string' && raw.senderId.trim()
         ? raw.senderId.trim().slice(0, MAX_SHORT_LENGTH)
         : defaults.senderId,
-    fullName: asStr(raw.fullName, defaults.fullName, MAX_SHORT_LENGTH),
-    schoolName: asStr(raw.schoolName, defaults.schoolName, MAX_SHORT_LENGTH),
-    schoolYear: asStr(raw.schoolYear, defaults.schoolYear, 64),
+    fullName: asStr(raw.fullName, defaults.fullName, MAX_SHORT_LENGTH, stats),
+    schoolName: asStr(raw.schoolName, defaults.schoolName, MAX_SHORT_LENGTH, stats),
+    schoolYear: asStr(raw.schoolYear, defaults.schoolYear, 64, stats),
     defaultSemester:
       raw.defaultSemester === 'I' || raw.defaultSemester === 'II'
         ? raw.defaultSemester
@@ -655,12 +765,12 @@ export function sanitizeProfile(raw: Partial<TeacherProfile>): TeacherProfile {
       raw.periodPreset === 'sem1' || raw.periodPreset === 'sem2' || raw.periodPreset === 'custom'
         ? raw.periodPreset
         : defaults.periodPreset,
-    periodText: asStr(raw.periodText, defaults.periodText, MAX_SHORT_LENGTH),
-    homeroomClass: asStr(raw.homeroomClass, defaults.homeroomClass, 64),
+    periodText: asStr(raw.periodText, defaults.periodText, MAX_SHORT_LENGTH, stats),
+    homeroomClass: asStr(raw.homeroomClass, defaults.homeroomClass, 64, stats),
     classesList,
     subjectsList: derivedSubjectsList,
     subjectAssignments,
-    signatureDate: asStr(raw.signatureDate, defaults.signatureDate, 64),
+    signatureDate: asStr(raw.signatureDate, defaults.signatureDate, 64, stats),
   };
 }
 
@@ -669,7 +779,10 @@ export function isValidReportDocument(doc: unknown): doc is ReportDocument {
   return typeof doc.type === 'string' && VALID_DOC_TYPES.has(doc.type);
 }
 
-export function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPackage[] {
+export function sanitizeSupervisionPackages(
+  raw: unknown,
+  stats?: SanitizeStats
+): TeacherSupervisionPackage[] {
   if (!Array.isArray(raw)) return [];
   const seenPkgIds = new Set<string>();
   const nowFallback = new Date().toISOString();
@@ -687,10 +800,11 @@ export function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPac
       const profile = sanitizeProfile(
         isPlainObject(item.teacherProfileSnapshot)
           ? (item.teacherProfileSnapshot as Partial<TeacherProfile>)
-          : {}
+          : {},
+        stats
       );
       const validDocs = Array.isArray(item.documents)
-        ? sanitizeDocuments(item.documents.filter(isValidReportDocument), profile)
+        ? sanitizeDocuments(item.documents.filter(isValidReportDocument), profile, stats)
         : [];
       const teacherKey =
         typeof item.teacherKey === 'string' && item.teacherKey.trim()
@@ -702,15 +816,15 @@ export function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPac
         teacherKey,
         teacherName:
           typeof item.teacherName === 'string' && item.teacherName.trim()
-            ? item.teacherName.trim().slice(0, MAX_SHORT_LENGTH)
+            ? asStr(item.teacherName.trim(), profile.fullName, MAX_SHORT_LENGTH, stats)
             : profile.fullName,
         schoolName:
           typeof item.schoolName === 'string' && item.schoolName.trim()
-            ? item.schoolName.trim().slice(0, MAX_SHORT_LENGTH)
+            ? asStr(item.schoolName.trim(), profile.schoolName, MAX_SHORT_LENGTH, stats)
             : profile.schoolName,
         homeroomClass:
           typeof item.homeroomClass === 'string'
-            ? item.homeroomClass.slice(0, 64)
+            ? asStr(item.homeroomClass, profile.homeroomClass, 64, stats)
             : profile.homeroomClass,
         exportedAt: sanitizeIsoDate(item.exportedAt, nowFallback),
         importedAt: sanitizeIsoDate(item.importedAt, nowFallback),
@@ -729,7 +843,10 @@ export function sanitizeSupervisionPackages(raw: unknown): TeacherSupervisionPac
     .filter((pkg) => pkg.documents.length > 0);
 }
 
-export function sanitizeSupervisionClassNotes(raw: unknown): Record<string, string> {
+export function sanitizeSupervisionClassNotes(
+  raw: unknown,
+  stats?: SanitizeStats
+): Record<string, string> {
   if (!isPlainObject(raw)) return {};
   const result: Record<string, string> = {};
   for (const [key, val] of Object.entries(raw)) {
@@ -740,7 +857,7 @@ export function sanitizeSupervisionClassNotes(raw: unknown): Record<string, stri
       typeof val === 'string' &&
       val.trim().length > 0
     ) {
-      result[key] = val.slice(0, MAX_TEXT_LENGTH);
+      result[key] = asStr(val, '', MAX_TEXT_LENGTH, stats);
     }
   }
   return result;
@@ -1085,8 +1202,68 @@ function sanitizeTermsAcceptanceRecord(raw: unknown): TermsAcceptanceRecord | nu
       typeof raw.acceptedAt === 'string' && raw.acceptedAt.trim()
         ? sanitizeIsoDate(raw.acceptedAt, '') || null
         : null,
-    version: asStr(raw.version, APP_VERSION, 64),
+    version: asStr(raw.version, '', 64).trim(),
   };
+}
+
+function parseSemverParts(ver: string): number[] | null {
+  const trimmed = ver.trim();
+  if (!/^\d+(?:\.\d+)*$/.test(trimmed)) return null;
+  return trimmed.split('.').map((part) => Number.parseInt(part, 10));
+}
+
+export function compareTermsVersions(a: string, b: string): number {
+  const pa = parseSemverParts(a);
+  const pb = parseSemverParts(b);
+  if (!pa && !pb) return 0;
+  if (!pa) return -1;
+  if (!pb) return 1;
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = pa[i] ?? 0;
+    const bv = pb[i] ?? 0;
+    if (av !== bv) return av > bv ? 1 : -1;
+  }
+  return 0;
+}
+
+export function isValidCurrentTermsAcceptance(
+  record: TermsAcceptanceRecord | null | undefined,
+  requiredVersion: string = LEGAL_DOCUMENTS_VERSION
+): boolean {
+  if (!record || record.accepted !== true || record.pending === true) {
+    return false;
+  }
+  if (!parseSemverParts(record.version)) {
+    return false;
+  }
+  return compareTermsVersions(record.version, requiredVersion) >= 0;
+}
+
+function selectLatestTermsAcceptanceRecord(
+  idbRec: TermsAcceptanceRecord | null | undefined,
+  lsRec: TermsAcceptanceRecord | null | undefined
+): TermsAcceptanceRecord | null {
+  if (!idbRec) return lsRec ?? null;
+  if (!lsRec) return idbRec;
+
+  const idbAccepted = idbRec.accepted === true && idbRec.pending !== true;
+  const lsAccepted = lsRec.accepted === true && lsRec.pending !== true;
+  if (idbAccepted !== lsAccepted) {
+    return lsAccepted ? lsRec : idbRec;
+  }
+
+  const verCmp = compareTermsVersions(idbRec.version, lsRec.version);
+  if (verCmp !== 0) {
+    return verCmp < 0 ? lsRec : idbRec;
+  }
+
+  const ta = idbRec.acceptedAt ? Date.parse(idbRec.acceptedAt) : Number.NaN;
+  const tb = lsRec.acceptedAt ? Date.parse(lsRec.acceptedAt) : Number.NaN;
+  if (Number.isFinite(tb) && (!Number.isFinite(ta) || tb > ta)) {
+    return lsRec;
+  }
+  return idbRec;
 }
 
 function sanitizeBackupReminderMetaRecord(raw: unknown): BackupReminderMeta {
@@ -1234,14 +1411,6 @@ async function writeStateToDb(
   }
 
   const replaceAll = Boolean(options?.replaceAll || !lastPersistedState);
-  if (
-    !replaceAll &&
-    !options?.forceOverwriteRevision &&
-    lastPersistedState === state &&
-    currentSaveStatus === 'saved'
-  ) {
-    return { ok: true, revision: currentKnownRevision };
-  }
 
   let conflictInfo: { dbRevision: number } | null = null;
   let committedNextRevision = 0;
@@ -1555,31 +1724,8 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
     );
     setCachedBackupReminderMeta(mergedBackupMeta);
 
-    const isVersionBelowRequired = (ver: string | null | undefined): boolean => {
-      if (!ver) return false;
-      const parseParts = (v: string) =>
-        v
-          .trim()
-          .split('.')
-          .map((part) => Number.parseInt(part, 10) || 0);
-      const a = parseParts(ver);
-      const b = parseParts(MIN_REQUIRED_TERMS_VERSION);
-      const len = Math.max(a.length, b.length);
-      for (let i = 0; i < len; i += 1) {
-        const av = a[i] ?? 0;
-        const bv = b[i] ?? 0;
-        if (av < bv) return true;
-        if (av > bv) return false;
-      }
-      return false;
-    };
-
-    const acceptedVersion = dbRead.termsAcceptance?.version ?? lsTerms?.version ?? null;
-    const isOutdatedAcceptedTerms = isVersionBelowRequired(acceptedVersion);
-
-    const isTermsAccepted =
-      (dbRead.termsAcceptance?.accepted === true || lsTerms?.accepted === true) &&
-      !isOutdatedAcceptedTerms;
+    const effectiveTerms = selectLatestTermsAcceptanceRecord(dbRead.termsAcceptance, lsTerms);
+    const requiresTermsAcceptance = !isValidCurrentTermsAcceptance(effectiveTerms);
 
     if (dbRead.found && dbRead.state) {
       currentKnownRevision = dbRead.revision;
@@ -1592,11 +1738,6 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
       if (legacy.status === 'valid') {
         clearLegacyLocalStorage();
       }
-
-      // Require acceptance on pending initial boot OR when an explicit prior acceptance version is outdated
-      const requiresTermsAcceptance =
-        (!isTermsAccepted && dbRead.termsAcceptance?.pending === true) ||
-        isOutdatedAcceptedTerms;
 
       return {
         state: dbRead.state,
@@ -1623,7 +1764,7 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
           backend: 'indexeddb',
           legacyStatus: 'migrated',
           revision: saveRes.revision,
-          requiresTermsAcceptance: false,
+          requiresTermsAcceptance,
           backupReminderMeta: mergedBackupMeta,
         };
       }
@@ -1634,7 +1775,7 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         backend: 'memory',
         legacyStatus: 'migration_write_failed',
         revision: 0,
-        requiresTermsAcceptance: false,
+        requiresTermsAcceptance,
         backupReminderMeta: mergedBackupMeta,
       };
     }
@@ -1650,15 +1791,19 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
         backend: 'indexeddb',
         legacyStatus: legacy.status,
         revision: 0,
-        requiresTermsAcceptance: false,
+        requiresTermsAcceptance,
         backupReminderMeta: mergedBackupMeta,
       };
     }
 
     const initialState = createInitialAppState();
-    const requiresTermsAcceptance = !isTermsAccepted;
     const pendingTermsRecord: TermsAcceptanceRecord | undefined = requiresTermsAcceptance
-      ? { accepted: false, pending: true, acceptedAt: null, version: APP_VERSION }
+      ? {
+          accepted: false,
+          pending: true,
+          acceptedAt: null,
+          version: LEGAL_DOCUMENTS_VERSION,
+        }
       : undefined;
 
     const saveRes = await saveAppStateImmediate(initialState, {
@@ -1692,11 +1837,7 @@ export async function loadAppState(): Promise<LoadAppStateResult> {
     setSaveStatus('memory_only');
     const legacy = readLegacyLocalStorageDetailed();
     setCachedBackupReminderMeta(lsBackupMeta);
-    const requiresTermsAcceptance =
-      legacy.status !== 'valid' &&
-      legacy.status !== 'corrupted' &&
-      legacy.status !== 'read_error' &&
-      lsTerms?.accepted !== true;
+    const requiresTermsAcceptance = !isValidCurrentTermsAcceptance(lsTerms);
     return {
       state: legacy.status === 'valid' ? legacy.state : createInitialAppState(),
       backend: 'memory',
@@ -1759,6 +1900,15 @@ export function saveAppStateImmediate(
       reason: 'conflict',
       dbRevision: currentKnownRevision,
     });
+  }
+
+  const noExtraOptions =
+    !options?.replaceAll &&
+    !options?.forceOverwriteRevision &&
+    !options?.initialTermsRecord &&
+    !options?.resetBackupMeta;
+  if (noExtraOptions && lastPersistedState === state && currentSaveStatus === 'saved') {
+    return Promise.resolve({ ok: true, revision: currentKnownRevision });
   }
 
   if (currentStorageBackend === 'indexeddb') {
@@ -1831,6 +1981,11 @@ export function flushPendingAppStateSave(): void {
   }
 }
 
+export async function waitForPendingAppStateSave(): Promise<SaveResult> {
+  flushPendingAppStateSave();
+  return writeQueue;
+}
+
 export async function retryIndexedDbPersistence(state: AppState): Promise<SaveResult> {
   currentStorageBackend = 'indexeddb';
   dbPromise = null;
@@ -1848,7 +2003,7 @@ export async function retryIndexedDbPersistence(state: AppState): Promise<SaveRe
 }
 
 export async function acceptTermsAndConditions(
-  version: string = APP_VERSION
+  version: string = LEGAL_DOCUMENTS_VERSION
 ): Promise<TermsAcceptanceRecord> {
   const record: TermsAcceptanceRecord = {
     accepted: true,
@@ -1979,7 +2134,7 @@ export async function resetAllStoredState(freshState: AppState): Promise<SaveRes
       accepted: false,
       pending: true,
       acceptedAt: null,
-      version: APP_VERSION,
+      version: LEGAL_DOCUMENTS_VERSION,
     },
     resetBackupMeta: true,
   });
@@ -2001,23 +2156,61 @@ export async function exportRawIndexedDbBackup(): Promise<boolean> {
   return false;
 }
 
-export async function wipeDatabaseForRecovery(): Promise<void> {
+export type RecoveryWipeResult =
+  | { ok: true }
+  | { ok: false; blocked: boolean; error: string };
+
+export async function wipeDatabaseForRecovery(): Promise<RecoveryWipeResult> {
+  if (dbPromise) {
+    try {
+      const existingDb = await dbPromise;
+      existingDb.close();
+    } catch {
+      // Ignore pending open failures during recovery wipe
+    }
+    dbPromise = null;
+  }
+
+  const idb = getIndexedDbApi();
+  if (idb) {
+    const idbResult = await new Promise<RecoveryWipeResult>((resolve) => {
+      try {
+        const req = idb.deleteDatabase(DB_NAME);
+        req.onsuccess = () => resolve({ ok: true });
+        req.onerror = () =>
+          resolve({
+            ok: false,
+            blocked: false,
+            error:
+              'Nie udało się usunąć lokalnej bazy IndexedDB. Zamknij pozostałe karty aplikacji i spróbuj ponownie.',
+          });
+        req.onblocked = () =>
+          resolve({
+            ok: false,
+            blocked: true,
+            error: 'Zamknij pozostałe karty aplikacji i spróbuj ponownie.',
+          });
+      } catch {
+        resolve({
+          ok: false,
+          blocked: false,
+          error: 'Nie udało się zainicjować usunięcia lokalnej bazy IndexedDB.',
+        });
+      }
+    });
+
+    if (!idbResult.ok) {
+      return idbResult;
+    }
+  }
+
   clearLegacyLocalStorage();
-  writeLocalTermsAcceptance(null);
   writeLocalBackupReminderMeta(null);
   setCachedBackupReminderMeta({ lastBackupExportAt: null, snoozedUntil: null });
   lastPersistedState = null;
   currentKnownRevision = 0;
   dbPromise = null;
-  const idb = getIndexedDbApi();
-  if (idb) {
-    await new Promise<void>((resolve) => {
-      const req = idb.deleteDatabase(DB_NAME);
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-      req.onblocked = () => resolve();
-    });
-  }
+  return { ok: true };
 }
 
 export function resetStorageRuntimeForTests(): void {
@@ -2046,22 +2239,142 @@ export function resetStorageRuntimeForTests(): void {
   backupMetaListeners.clear();
 }
 
-export function exportStateAsJson(state: AppState): boolean {
-  const payload = {
-    app: 'E-Sprawozdania',
-    exportedAt: new Date().toISOString(),
+export interface BackupScopeOptions {
+  schoolYear?: string;
+  includeRelatedBases?: boolean;
+}
+
+export interface BackupJsonExportSummary {
+  ok: boolean;
+  filename: string;
+  byteLength: number;
+  evaluation: BackupSizeEvaluation;
+}
+
+export function getAvailableBackupSchoolYears(state: AppState): string[] {
+  const years = new Set<string>();
+  for (const doc of state.documents) {
+    const yr = doc.schoolYear.trim();
+    if (yr) years.add(yr);
+  }
+  const profileYear = state.profile.schoolYear.trim();
+  if (profileYear) years.add(profileYear);
+  return Array.from(years).sort((a, b) => b.localeCompare(a, 'pl', { numeric: true }));
+}
+
+export function createScopedBackupState(
+  state: AppState,
+  options?: BackupScopeOptions
+): AppState {
+  const schoolYear = options?.schoolYear?.trim();
+  if (!schoolYear || schoolYear === 'all') {
+    return state;
+  }
+
+  const filteredDocuments = state.documents.filter(
+    (doc) => doc.schoolYear.trim() === schoolYear
+  );
+  const activeDocumentId =
+    state.activeDocumentId && filteredDocuments.some((doc) => doc.id === state.activeDocumentId)
+      ? state.activeDocumentId
+      : filteredDocuments[0]?.id ?? null;
+
+  const includeRelatedBases = options?.includeRelatedBases ?? true;
+  if (!includeRelatedBases) {
+    return {
+      ...state,
+      documents: filteredDocuments,
+      activeDocumentId,
+      customWnioski: [],
+      customTemplates: [],
+      supervisionPackages: [],
+      supervisionClassNotes: {},
+    };
+  }
+
+  return {
+    ...state,
+    documents: filteredDocuments,
+    activeDocumentId,
+  };
+}
+
+export function buildFullBackupPayload(
+  state: AppState,
+  exportedAt: string = new Date().toISOString()
+) {
+  return {
+    app: 'E-Sprawozdania' as const,
+    kind: 'full_backup' as const,
+    exportedAt,
     ...state,
   };
+}
+
+export function serializeBackupJson(
+  state: AppState,
+  options?: BackupScopeOptions
+): {
+  jsonText: string;
+  byteLength: number;
+  evaluation: BackupSizeEvaluation;
+  scopedState: AppState;
+} {
+  const scopedState = createScopedBackupState(state, options);
+  const payload = buildFullBackupPayload(scopedState);
+  const jsonText = JSON.stringify(payload, null, 2);
+  const byteLength =
+    typeof Blob !== 'undefined'
+      ? new Blob([jsonText], { type: 'application/json;charset=utf-8' }).size
+      : new TextEncoder().encode(jsonText).byteLength;
+  const evaluation = evaluateBackupExportSize(byteLength);
+  return {
+    jsonText,
+    byteLength,
+    evaluation,
+    scopedState,
+  };
+}
+
+function buildBackupFilenameSlug(schoolYear?: string): string {
+  const trimmed = schoolYear?.trim();
+  if (!trimmed || trimmed === 'all') return '';
+  return `-${trimmed.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
+}
+
+export function exportStateAsJsonWithSummary(
+  state: AppState,
+  options?: BackupScopeOptions
+): BackupJsonExportSummary {
+  const { jsonText, byteLength, evaluation } = serializeBackupJson(state, options);
   const dateTag = new Date().toISOString().slice(0, 10);
-  const ok = triggerJsonDownload(payload, `sprawozdania-kopia-${dateTag}.json`);
+  const yearSlug = buildBackupFilenameSlug(options?.schoolYear);
+  const filename = `sprawozdania-kopia${yearSlug}-${dateTag}.json`;
+  const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+  const ok = triggerBlobDownload(blob, filename);
   if (ok) {
     void recordBackupExportNow();
   }
-  return ok;
+  return {
+    ok,
+    filename,
+    byteLength,
+    evaluation,
+  };
+}
+
+export function exportStateAsJson(state: AppState, options?: BackupScopeOptions): boolean {
+  return exportStateAsJsonWithSummary(state, options).ok;
 }
 
 export function validateAndParseImportedJson(jsonText: string):
-  | { ok: true; state: AppState }
+  | {
+      ok: true;
+      state: AppState;
+      warnings?: string[];
+      truncatedFieldsCount?: number;
+      droppedItemsCount?: number;
+    }
   | { ok: false; error: string } {
   if (typeof jsonText !== 'string' || jsonText.trim().length === 0) {
     return { ok: false, error: 'Wybrany plik JSON jest pusty.' };
@@ -2072,11 +2385,22 @@ export function validateAndParseImportedJson(jsonText: string):
       error: `Zawartość pliku JSON przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB) i nie została przetworzona.`,
     };
   }
+
+  let data: unknown;
   try {
-    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    data = JSON.parse(jsonText);
+  } catch {
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
+  }
+
+  try {
     if (!isPlainObject(data)) {
       return { ok: false, error: 'Plik nie zawiera prawidłowego obiektu JSON.' };
     }
+    // Older v1.0-v1.x backups without explicit `app` remain supported if `profile` + `documents` pass structural checks.
     if (data.app !== undefined && data.app !== 'E-Sprawozdania') {
       return {
         ok: false,
@@ -2105,6 +2429,12 @@ export function validateAndParseImportedJson(jsonText: string):
       (typeof data.version !== 'number' || !Number.isFinite(data.version) || data.version < 1)
     ) {
       return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
+    }
+    if (typeof data.version === 'number' && data.version > MAX_SUPPORTED_BACKUP_VERSION) {
+      return {
+        ok: false,
+        error: `Kopia pochodzi z nowszej, nieobsługiwanej wersji formatu danych (wersja ${data.version}; maksymalna obsługiwana: ${MAX_SUPPORTED_BACKUP_VERSION}). Zaktualizuj aplikację przed importem.`,
+      };
     }
 
     if (!isPlainObject(data.profile)) {
@@ -2207,13 +2537,27 @@ export function validateAndParseImportedJson(jsonText: string):
       };
     }
 
-    const profile = sanitizeProfile(data.profile as Partial<TeacherProfile>);
-    const sanitizedDocuments = sanitizeDocuments(data.documents, profile);
+    const sanitizeStats = createSanitizeStats();
+    const profile = sanitizeProfile(data.profile as Partial<TeacherProfile>, sanitizeStats);
+    const sanitizedDocuments = sanitizeDocuments(data.documents, profile, sanitizeStats);
     const activeDocumentId =
       typeof data.activeDocumentId === 'string' &&
       sanitizedDocuments.some((d) => d.id === data.activeDocumentId)
         ? data.activeDocumentId
         : sanitizedDocuments[0]?.id ?? null;
+
+    const customWnioski = sanitizeCustomWnioski(data.customWnioski, sanitizeStats);
+    const customTemplates = sanitizeCustomTemplates(data.customTemplates, sanitizeStats);
+    const supervisionPackages = sanitizeSupervisionPackages(
+      data.supervisionPackages,
+      sanitizeStats
+    );
+    const supervisionClassNotes = sanitizeSupervisionClassNotes(
+      data.supervisionClassNotes,
+      sanitizeStats
+    );
+
+    const summary = summarizeSanitizeWarnings(sanitizeStats);
 
     return {
       ok: true,
@@ -2222,16 +2566,24 @@ export function validateAndParseImportedJson(jsonText: string):
         profile,
         documents: sanitizedDocuments,
         activeDocumentId,
-        customWnioski: sanitizeCustomWnioski(data.customWnioski),
-        customTemplates: sanitizeCustomTemplates(data.customTemplates),
-        supervisionPackages: sanitizeSupervisionPackages(data.supervisionPackages),
-        supervisionClassNotes: sanitizeSupervisionClassNotes(data.supervisionClassNotes),
+        customWnioski,
+        customTemplates,
+        supervisionPackages,
+        supervisionClassNotes,
       },
+      ...(summary.warnings.length > 0 ? { warnings: summary.warnings } : {}),
+      ...(summary.truncatedFieldsCount > 0
+        ? { truncatedFieldsCount: summary.truncatedFieldsCount }
+        : {}),
+      ...(summary.droppedItemsCount > 0 ? { droppedItemsCount: summary.droppedItemsCount } : {}),
     };
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error('validateAndParseImportedJson processing error:', err);
+    }
     return {
       ok: false,
-      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+      error: 'Nie udało się przetworzyć kopii zapasowej.',
     };
   }
 }
@@ -2241,6 +2593,8 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       ok: true;
       pkg: TeacherSupervisionPackage;
       sourceKind: 'supervision_package' | 'full_backup';
+      warnings?: string[];
+      truncatedFieldsCount?: number;
     }
   | {
       ok: false;
@@ -2255,8 +2609,18 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       error: `Plik paczki nadzoru przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB).`,
     };
   }
+
+  let raw: unknown;
   try {
-    const raw = JSON.parse(jsonText) as Record<string, unknown>;
+    raw = JSON.parse(jsonText);
+  } catch {
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
+  }
+
+  try {
     if (!isPlainObject(raw)) {
       return { ok: false, error: 'Wybrany plik nie zawiera prawidłowego obiektu JSON.' };
     }
@@ -2286,6 +2650,12 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
     ) {
       return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
     }
+    if (typeof raw.version === 'number' && raw.version > MAX_SUPPORTED_BACKUP_VERSION) {
+      return {
+        ok: false,
+        error: `Paczka pochodzi z nowszej, nieobsługiwanej wersji formatu danych (wersja ${raw.version}; maksymalna obsługiwana: ${MAX_SUPPORTED_BACKUP_VERSION}).`,
+      };
+    }
 
     const isDedicated = raw.kind === 'supervision_package';
     const rawProfile = isDedicated ? raw.teacherProfileSnapshot : raw.profile;
@@ -2314,8 +2684,9 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       };
     }
 
-    const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>);
-    const validDocs = sanitizeDocuments(raw.documents, profile);
+    const sanitizeStats = createSanitizeStats();
+    const profile = sanitizeProfile(rawProfile as Partial<TeacherProfile>, sanitizeStats);
+    const validDocs = sanitizeDocuments(raw.documents, profile, sanitizeStats);
     if (validDocs.length === 0) {
       return {
         ok: false,
@@ -2365,15 +2736,24 @@ export function validateAndParseSupervisionPackageJson(jsonText: string):
       documents: validDocs,
     };
 
+    const summary = summarizeSanitizeWarnings(sanitizeStats);
+
     return {
       ok: true,
       pkg,
       sourceKind: isDedicated ? 'supervision_package' : 'full_backup',
+      ...(summary.warnings.length > 0 ? { warnings: summary.warnings } : {}),
+      ...(summary.truncatedFieldsCount > 0
+        ? { truncatedFieldsCount: summary.truncatedFieldsCount }
+        : {}),
     };
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error('validateAndParseSupervisionPackageJson processing error:', err);
+    }
     return {
       ok: false,
-      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+      error: 'Nie udało się przetworzyć kopii paczki nadzoru.',
     };
   }
 }
@@ -2420,6 +2800,8 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
       customWnioski: CustomWniosekEntry[];
       customTemplates: CustomTemplateEntry[];
       sourceKind: 'phrases_bundle' | 'full_backup';
+      warnings?: string[];
+      truncatedFieldsCount?: number;
     }
   | {
       ok: false;
@@ -2434,8 +2816,18 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
       error: `Plik wniosków i szablonów przekracza dopuszczalny limit rozmiaru (${MAX_IMPORT_FILE_MIB} MiB).`,
     };
   }
+
+  let data: unknown;
   try {
-    const data = JSON.parse(jsonText) as Record<string, unknown>;
+    data = JSON.parse(jsonText);
+  } catch {
+    return {
+      ok: false,
+      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+    };
+  }
+
+  try {
     if (!isPlainObject(data)) {
       return { ok: false, error: 'Plik nie zawiera prawidłowego obiektu JSON.' };
     }
@@ -2464,6 +2856,12 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
       (typeof data.version !== 'number' || !Number.isFinite(data.version) || data.version < 1)
     ) {
       return { ok: false, error: 'Plik zawiera nieprawidłowy numer wersji.' };
+    }
+    if (typeof data.version === 'number' && data.version > MAX_SUPPORTED_BACKUP_VERSION) {
+      return {
+        ok: false,
+        error: `Plik pochodzi z nowszej, nieobsługiwanej wersji formatu danych (wersja ${data.version}; maksymalna obsługiwana: ${MAX_SUPPORTED_BACKUP_VERSION}).`,
+      };
     }
 
     const hasWnioskiArray = Array.isArray(data.customWnioski);
@@ -2496,8 +2894,9 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
       };
     }
 
-    const customWnioski = sanitizeCustomWnioski(data.customWnioski);
-    const customTemplates = sanitizeCustomTemplates(data.customTemplates);
+    const sanitizeStats = createSanitizeStats();
+    const customWnioski = sanitizeCustomWnioski(data.customWnioski, sanitizeStats);
+    const customTemplates = sanitizeCustomTemplates(data.customTemplates, sanitizeStats);
 
     if (customWnioski.length === 0 && customTemplates.length === 0) {
       return {
@@ -2514,16 +2913,25 @@ export function validateAndParseSharedPhrasesJson(jsonText: string):
           ? 'full_backup'
           : 'phrases_bundle';
 
+    const summary = summarizeSanitizeWarnings(sanitizeStats);
+
     return {
       ok: true,
       customWnioski,
       customTemplates,
       sourceKind,
+      ...(summary.warnings.length > 0 ? { warnings: summary.warnings } : {}),
+      ...(summary.truncatedFieldsCount > 0
+        ? { truncatedFieldsCount: summary.truncatedFieldsCount }
+        : {}),
     };
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error('validateAndParseSharedPhrasesJson processing error:', err);
+    }
     return {
       ok: false,
-      error: 'Nie udało się odczytać pliku JSON. Sprawdź, czy plik nie jest uszkodzony.',
+      error: 'Nie udało się przetworzyć kopii wniosków i szablonów.',
     };
   }
 }

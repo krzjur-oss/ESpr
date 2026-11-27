@@ -38,6 +38,9 @@ jobs:
       - name: Uruchom testy automatyczne
         run: npm test
 
+      - name: Audyt zależności produkcyjnych
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Zbuduj aplikację produkcyjną (PWA)
         run: npm run build
 

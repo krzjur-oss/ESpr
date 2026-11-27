@@ -24,9 +24,18 @@ import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { flushPendingAppStateSave, waitForPendingAppStateSave } from './utils/storage';
 import './index.css';
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: false,
+  onNeedRefresh() {
+    flushPendingAppStateSave();
+    void waitForPendingAppStateSave().finally(() => {
+      void updateSW(true);
+    });
+  },
+});
 
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>

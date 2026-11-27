@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.1';
+export const APP_VERSION = '1.8.2';
 export const APP_RELEASE_DATE = 'listopad 2026';
 
 export interface ChangelogEntry {
@@ -10,6 +10,20 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
+  {
+    version: '1.8.2',
+    date: 'listopad 2026',
+    title: 'Spójność akceptacji regulaminu, eksport zawężony do roku, bezpieczeństwo PDF/ZIP/nadzoru i CSP',
+    summary:
+      'Naprawiono weryfikację wersji dokumentów prawnych przy starcie, dodano ostrzeżenia rozmiaru oraz eksport zawężony do wybranego roku szkolnego, zabezpieczono obsługę dużych i pustych arkuszy PDF, dodano nagłówek CSP oraz usunięto pliki robocze z katalogu publikowanego.',
+    changes: [
+      'Rozdzielono wersję aplikacji (1.8.2) od wersji dokumentów prawnych (LEGAL_DOCUMENTS_VERSION = 1.8.1), usunięto automatyczne podstawianie APP_VERSION przy braku pola wersji zgody oraz ujednolicono porównywanie rekordów akceptacji w IndexedDB, localStorage i trybie pamięciowym.',
+      'Dodano bieżące wyliczanie rozmiaru kopii JSON i .zip przed eksportem z wyraźnym ostrzeżeniem po przekroczeniu limitu importu (25 MiB) oraz funkcją zawężenia kopii do wybranego roku szkolnego (w tym opcjonalnym wyłączeniem baz dodatkowych) z zachowaniem zgodności formatu.',
+      'W eksporcie PDF zapisywane są pominięte puste arkusze (wyświetlane jako ostrzeżenie, a przy pominięciu wszystkich kart — jako błąd), wprowadzono adaptacyjne skalowanie bardzo wysokich kart (limit wysokości i powierzchni płótna) oraz informację w zakładce „O programie” o obrazowym charakterze PDF względem druku tekstowego.',
+      'Wzmocniono walidatory JSON (osobne try/catch dla JSON.parse i sanitizerów, odrzucanie nieobsługiwanych wersji > 1, zachowanie kompatybilności ze starszymi kopiami bez pola app, raportowanie obciętych pól > 100 000 znaków), bezpieczne odtwarzanie w ErrorBoundary przy zablokowanej bazie przez inną kartę oraz sekwencyjny import paczek nadzoru z limitem partii i wyborem użytkownika przy kolizji samego imienia i nazwiska.',
+      'Zoptymalizowano strumieniową dekompresję ZIP (większy bufor i MessageChannel zamiast setTimeout(0)), dodano politykę CSP i <noscript> w index.html, zaktualizowano tryb aktualizacji Service Workera z oczekiwaniem na zapis przed przeładowaniem, wygenerowano THIRD_PARTY_NOTICES.txt, usunięto pliki robocze z katalogu public/ oraz rozszerzono zestaw testów Vitest do 58 scenariuszy.',
+    ],
+  },
   {
     version: '1.8.1',
     date: '27.11.2026',

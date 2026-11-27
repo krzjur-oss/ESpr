@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
     <title>E-Sprawozdania — Kreator Sprawozdań Szkolnych</title>
     <meta
       name="description"
@@ -14,7 +18,9 @@
       content="Nowoczesna aplikacja Local-First PWA dla nauczycieli i specjalistów szkoły do tworzenia, podglądu i drukowania sprawozdań semestralnych i rocznych offline."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="./pwa-512x512.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="./pwa-512x512.png" />
     <meta name="theme-color" content="#1E3A8A" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -24,6 +30,14 @@
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased">
+    <noscript>
+      <div style="margin:2rem auto;max-width:600px;padding:1.5rem;border:1px solid #cbd5e1;border-radius:0.75rem;background:#ffffff;font-family:sans-serif;color:#0f172a;">
+        <h1 style="font-size:1.125rem;font-weight:700;margin:0 0 0.5rem;">Wymagana obsługa JavaScript</h1>
+        <p style="font-size:0.875rem;line-height:1.5;margin:0;">
+          Aplikacja <strong>E-Sprawozdania</strong> działa w przeglądarce lokalnie (Local-First PWA) i wymaga włączonej obsługi JavaScript. Włącz JavaScript w ustawieniach przeglądarki i odśwież stronę.
+        </p>
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

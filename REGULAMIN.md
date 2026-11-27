@@ -1,6 +1,6 @@
 # Regulamin i Polityka Prywatności aplikacji „E-Sprawozdania — Kreator Sprawozdań Szkolnych”
 
-**Wersja 1.8.1 · 27.11.2026 r. (do potwierdzenia daty wdrożenia przez wydawcę; pierwotnie od 24.11.2026 r.)**
+**Wersja dokumentów prawnych: 1.8.1 (dla aplikacji v1.8.2) · Data wejścia w życie: do uzupełnienia przez wydawcę**
 
 > **Status prawny generowanych dokumentów:**  
 > E-Sprawozdania jest narzędziem pomocniczym do przygotowywania roboczych kart, zestawień i sprawozdań. Nie zastępuje dzienników, arkuszy ocen ani innej dokumentacji, której prowadzenie, treść, forma, podpisy i przechowywanie wynikają z przepisów prawa lub procedur placówki. Przed wykorzystaniem dokumentu należy zweryfikować jego zgodność z wymaganiami dyrektora i szkoły.
@@ -98,10 +98,10 @@ Szczegółowe warunki licencyjne określa plik `LICENSE.md`.
 2. O istotnych zmianach Regulaminu lub Licencji użytkownik jest informowany bezpośrednio w Aplikacji. Jeżeli zmiana istotnie zmienia warunki korzystania z Aplikacji, Aplikacja wymaga ponownego potwierdzenia warunków przed dalszą pracą (bez usuwania ani ukrywania istniejących danych lokalnych).
 3. Nie przyjmuje się, że samo dalsze otwarcie lub korzystanie z Aplikacji automatycznie sanuje każdą zmianę warunków w każdej relacji prawnej.
 
-**Archiwum wersji dokumentu:**
+**Archiwum wersji dokumentów prawnych:**
 - **Wersja 1.0** — 24.11.2026 r. (pierwotne wydanie Regulaminu i WLDE)
 - **Wersja 1.8.0** — 26.11.2026 r. (dostosowanie do eksportu ZIP, PDF, blokady kart i zgody startowej)
-- **Wersja 1.8.1** — 27.11.2026 r. (doprecyzowanie RODO, statusu pomocniczego, limitów importu oraz wyjątków ustawowych pr. aut.)
+- **Wersja 1.8.1** — data wejścia w życie do uzupełnienia przez wydawcę (doprecyzowanie RODO, statusu pomocniczego, limitów importu oraz wyjątków ustawowych pr. aut.; obowiązuje także dla aplikacji `1.8.2`)
 
 ---
 

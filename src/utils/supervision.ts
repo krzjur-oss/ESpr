@@ -179,6 +179,11 @@ export function buildTeacherKey(profile: TeacherProfile, docs: ReportDocument[] 
   return `name:${name}::${school}`;
 }
 
+export const MAX_SUPERVISION_BATCH_FILES = 50;
+export const MAX_SUPERVISION_BATCH_TOTAL_BYTES = 50 * 1024 * 1024;
+
+export type NameCollisionResolution = 'same_teacher' | 'new_teacher';
+
 export function resolvePackageTeacherName(pkg: TeacherSupervisionPackage): string {
   if (pkg.teacherName.trim()) return pkg.teacherName.trim();
   if (pkg.teacherProfileSnapshot.fullName.trim()) return pkg.teacherProfileSnapshot.fullName.trim();
@@ -188,6 +193,83 @@ export function resolvePackageTeacherName(pkg: TeacherSupervisionPackage): strin
     if ('coordinatorName' in d && d.coordinatorName.trim()) return d.coordinatorName.trim();
   }
   return 'Nauczyciel (brak podpisu w profilu)';
+}
+
+export function findNameOnlySupervisionMatchIndex(
+  packages: TeacherSupervisionPackage[],
+  incoming: TeacherSupervisionPackage
+): number {
+  const normName = resolvePackageTeacherName(incoming).trim().toLowerCase();
+  if (!normName || normName.startsWith('nauczyciel (brak')) return -1;
+  const normSchool = incoming.schoolName.trim().toLowerCase();
+  return packages.findIndex((p) => {
+    if (p.teacherKey === incoming.teacherKey) return false;
+    const pName = resolvePackageTeacherName(p).trim().toLowerCase();
+    const pSchool = p.schoolName.trim().toLowerCase();
+    return pName === normName && (!normSchool || !pSchool || pSchool === normSchool);
+  });
+}
+
+export function mergeSupervisionBatch(
+  basePackages: TeacherSupervisionPackage[],
+  parsedItems: Array<
+    | { fileName: string; ok: true; pkg: TeacherSupervisionPackage }
+    | { fileName: string; ok: false; error: string }
+  >,
+  nameCollisionDecisions: Record<string, NameCollisionResolution> = {},
+  batchImportedAt: string = new Date().toISOString()
+): {
+  working: TeacherSupervisionPackage[];
+  diffs: PackageDiffResult[];
+  added: number;
+  unchanged: number;
+  errors: string[];
+} {
+  const working = [...basePackages];
+  const diffs: PackageDiffResult[] = [];
+  let added = 0;
+  let unchanged = 0;
+  const errors: string[] = [];
+
+  for (const item of parsedItems) {
+    if (!item.ok) {
+      errors.push(`${item.fileName}: ${item.error}`);
+      continue;
+    }
+
+    const incoming: TeacherSupervisionPackage = {
+      ...item.pkg,
+      importedAt: batchImportedAt,
+    };
+
+    let existingIdx = working.findIndex((p) => p.teacherKey === incoming.teacherKey);
+    if (existingIdx === -1) {
+      const decision = nameCollisionDecisions[incoming.id];
+      if (decision === 'same_teacher') {
+        existingIdx = findNameOnlySupervisionMatchIndex(working, incoming);
+      }
+    }
+
+    if (existingIdx === -1) {
+      working.push(incoming);
+      added += 1;
+    } else {
+      const existingPkg = working[existingIdx];
+      if (!existingPkg) continue;
+      const diff = diffSupervisionPackage(existingPkg, incoming);
+      if (diff.hasAnyChanges) {
+        diffs.push(diff);
+      } else {
+        working[existingIdx] = {
+          ...existingPkg,
+          importedAt: batchImportedAt,
+        };
+        unchanged += 1;
+      }
+    }
+  }
+
+  return { working, diffs, added, unchanged, errors };
 }
 
 export function buildClassNotesKey(

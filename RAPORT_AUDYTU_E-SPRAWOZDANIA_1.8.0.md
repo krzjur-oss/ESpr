@@ -143,3 +143,14 @@ Poniższe elementy **nie zostały wdrożone automatycznie po stronie hostingu** 
 ### 5.3. Notatki prawno-właścicielskie dla właściciela projektu
 1. **Weryfikacja art. 74 ust. 3 pr. aut.:** Właściciel projektu powinien samodzielnie zweryfikować, czy żadna część kodu źródłowego, szablonów lub bazy wniosków nie powstała w ramach wykonywania obowiązków ze stosunku pracy (art. 74 ust. 3 ustawy o prawie autorskim i prawach pokrewnych), ponieważ w takim przypadku majątkowe prawa autorskie mogłyby przysługiwać pracodawcy, o ile umowa nie stanowi inaczej.
 2. **Data wejścia w życie regulaminu i licencji:** W plikach `REGULAMIN.md`, `LICENSE.md` oraz `LegalDocumentsContent.tsx` wskazano datę `27.11.2026 r.` z adnotacją `(do potwierdzenia daty wdrożenia przez wydawcę)` — po faktycznej publikacji wersji `1.8.0` wydawca powinien potwierdzić rzeczywistą datę wdrożenia.
+
+---
+
+## 6. Korekta (errata) dot. `MIN_REQUIRED_TERMS_VERSION` (dopisano przy wydaniu `1.8.2`)
+
+- W wierszu `1.1 (pkt 7)` oraz `2.3` niniejszego raportu wskazano wdrożenie mechanizmu `MIN_REQUIRED_TERMS_VERSION = '1.8.0'`. W praktyce w wersji `1.8.1`:
+  1. stała pozostała na poziomie `'1.8.0'` (mimo aktualizacji treści dokumentów prawnych w `1.8.1`),
+  2. istniejące bazy IndexedDB bez rekordu `termsAcceptance` (`dbRead.found === true`) pomijały monit akceptacji,
+  3. funkcja `sanitizeTermsAcceptanceRecord` podstawiała `APP_VERSION` przy braku pola `version`, a przy wyborze rekordu z IndexedDB i `localStorage` stosowano operator `??` bez porównania wersji/dat, ponadto gałąź `catch` w `loadAppState()` nie weryfikowała wersji akceptacji.
+- W wydaniu **`1.8.2`** wprowadzono niezależną stałą `LEGAL_DOCUMENTS_VERSION = '1.8.1'` (`MIN_REQUIRED_TERMS_VERSION = LEGAL_DOCUMENTS_VERSION`), usunięto podstawianie `APP_VERSION` za brakującą wersję oraz ujednolicono wymaganie ważnej akceptacji bieżącej wersji dokumentów we wszystkich ścieżkach `loadAppState()`.
+

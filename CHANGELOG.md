@@ -4,6 +4,20 @@ Wszystkie istotne zmiany w programie **E-Sprawozdania — Kreator Sprawozdań Sz
 
 ---
 
+## [1.8.2] — listopad 2026
+
+**Spójność akceptacji regulaminu, eksport zawężony do roku, bezpieczeństwo PDF/ZIP/nadzoru i CSP**
+
+Naprawiono weryfikację wersji dokumentów prawnych przy starcie, dodano ostrzeżenia rozmiaru oraz eksport zawężony do wybranego roku szkolnego, zabezpieczono obsługę dużych i pustych arkuszy PDF, dodano nagłówek CSP oraz usunięto pliki robocze z katalogu publikowanego.
+
+- Rozdzielono wersję aplikacji (`1.8.2`) od wersji dokumentów prawnych (`LEGAL_DOCUMENTS_VERSION = '1.8.1'`), usunięto automatyczne podstawianie `APP_VERSION` przy braku pola wersji zgody oraz ujednolicono porównywanie rekordów akceptacji w IndexedDB, `localStorage` i trybie pamięciowym.
+- Dodano bieżące wyliczanie rozmiaru kopii JSON i `.zip` przed eksportem z wyraźnym ostrzeżeniem po przekroczeniu limitu importu (`25 MiB`) oraz funkcją zawężenia kopii do wybranego roku szkolnego (w tym opcjonalnym wyłączeniem baz dodatkowych) z zachowaniem zgodności formatu.
+- W eksporcie PDF zapisywane są pominięte puste arkusze (wyświetlane jako ostrzeżenie, a przy pominięciu wszystkich kart — jako błąd), wprowadzono adaptacyjne skalowanie bardzo wysokich kart (limit wysokości i powierzchni płótna) oraz informację w zakładce „O programie” o obrazowym charakterze PDF względem druku tekstowego.
+- Wzmocniono walidatory JSON (osobne `try/catch` dla `JSON.parse` i sanitizerów, odrzucanie nieobsługiwanych wersji `> 1`, zachowanie kompatybilności ze starszymi kopiami bez pola `app`, raportowanie obciętych pól `> 100 000` znaków), bezpieczne odtwarzanie w `ErrorBoundary` przy zablokowanej bazie przez inną kartę oraz sekwencyjny import paczek nadzoru z limitem partii i wyborem użytkownika przy kolizji samego imienia i nazwiska.
+- Zoptymalizowano strumieniową dekompresję ZIP (`STREAM_CHUNK_BYTES = 65536` i `MessageChannel`), dodano politykę CSP, `<noscript>` oraz `og:image`/`twitter:image` w `index.html`, ustawiono `registerType: 'prompt'` z oczekiwaniem na zapis przed przeładowaniem SW, wygenerowano `THIRD_PARTY_NOTICES.txt`, przeniesiono pliki robocze poza katalog `public/` oraz rozszerzono zestaw testów Vitest do **58 scenariuszy**.
+
+---
+
 ## [1.8.1] — 27.11.2026
 
 **Zabezpieczenie importu JSON/ZIP, doprecyzowanie RODO i licencji WLDE oraz testy w CI**
